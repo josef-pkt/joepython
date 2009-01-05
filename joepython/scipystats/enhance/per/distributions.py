@@ -2,18 +2,14 @@
 #   various Continous and Discrete Probability Distributions
 #
 # Author:  Travis Oliphant  2002-2003
-
-
-from __future__ import division
+#
 
 import scipy
-from scipy.stats.plotbackend import plotbackend
-from scipy.integrate import quad
-from scipy.linalg import pinv2
 from scipy.misc import comb, derivative
 from scipy import special
 from scipy import optimize
-import numdifftools
+import scipy.integrate
+
 import inspect
 from numpy import alltrue, where, arange, put, putmask, \
      ravel, take, ones, sum, shape, product, repeat, reshape, \
@@ -28,38 +24,35 @@ import numpy.random as mtrand
 from numpy import flatnonzero as nonzero
 from scipy.special import gammaln as gamln
 from copy import copy
-#import vonmises_cython
+import vonmises_cython
+import textwrap
 
 __all__ = [
-    'rv_continuous',
-    'ksone', 'kstwobign', 'norm', 'alpha', 'anglit', 'arcsine',
-    'beta', 'betaprime', 'bradford', 'burr', 'fisk', 'cauchy',
-    'chi', 'chi2', 'cosine', 'dgamma', 'dweibull', 'erlang',
-    'expon', 'exponweib', 'exponpow', 'fatiguelife', 'foldcauchy',
-    'f', 'foldnorm', 'frechet_r', 'weibull_min', 'frechet_l',
-    'weibull_max', 'genlogistic', 'genpareto', 'genexpon', 'genextreme',
-    'gamma', 'gengamma', 'genhalflogistic', 'gompertz', 'gumbel_r',
-    'gumbel_l', 'halfcauchy', 'halflogistic', 'halfnorm', 'hypsecant',
-    'gausshyper', 'invgamma', 'invnorm', 'invweibull', 'johnsonsb',
-    'johnsonsu', 'laplace', 'levy', 'levy_l', 'levy_stable',
-    'logistic', 'loggamma', 'loglaplace', 'lognorm', 'gilbrat',
-    'maxwell', 'mielke', 'nakagami', 'ncx2', 'ncf', 't',
-    'nct', 'pareto', 'lomax', 'powerlaw', 'powerlognorm', 'powernorm',
-    'rdist', 'rayleigh', 'reciprocal', 'rice', 'recipinvgauss',
-    'semicircular', 'triang', 'truncexpon', 'truncnorm',
-    'tukeylambda', 'uniform', 'vonmises', 'wald', 'wrapcauchy',
-    'entropy', 'rv_discrete',
-    'binom', 'bernoulli', 'nbinom', 'geom', 'hypergeom', 'logser',
-    'poisson', 'planck', 'boltzmann', 'randint', 'zipf', 'dlaplace',
-]
+           'rv_continuous',
+           'ksone', 'kstwobign', 'norm', 'alpha', 'anglit', 'arcsine',
+           'beta', 'betaprime', 'bradford', 'burr', 'fisk', 'cauchy',
+           'chi', 'chi2', 'cosine', 'dgamma', 'dweibull', 'erlang',
+           'expon', 'exponweib', 'exponpow', 'fatiguelife', 'foldcauchy',
+           'f', 'foldnorm', 'frechet_r', 'weibull_min', 'frechet_l',
+           'weibull_max', 'genlogistic', 'genpareto', 'genexpon', 'genextreme',
+           'gamma', 'gengamma', 'genhalflogistic', 'gompertz', 'gumbel_r',
+           'gumbel_l', 'halfcauchy', 'halflogistic', 'halfnorm', 'hypsecant',
+           'gausshyper', 'invgamma', 'invnorm', 'invweibull', 'johnsonsb',
+           'johnsonsu', 'laplace', 'levy', 'levy_l', 'levy_stable',
+           'logistic', 'loggamma', 'loglaplace', 'lognorm', 'gilbrat',
+           'maxwell', 'mielke', 'nakagami', 'ncx2', 'ncf', 't',
+           'nct', 'pareto', 'lomax', 'powerlaw', 'powerlognorm', 'powernorm',
+           'rdist', 'rayleigh', 'reciprocal', 'rice', 'recipinvgauss',
+           'semicircular', 'triang', 'truncexpon', 'truncnorm',
+           'tukeylambda', 'uniform', 'vonmises', 'wald', 'wrapcauchy',
+           'entropy', 'rv_discrete',
+           'binom', 'bernoulli', 'nbinom', 'geom', 'hypergeom', 'logser',
+           'poisson', 'planck', 'boltzmann', 'randint', 'zipf', 'dlaplace',
+          ]
 
 floatinfo = numpy.finfo(float)
-longinfo = numpy.iinfo(long)
-intinfo = numpy.iinfo(int)
-
 
 errp = special.errprint
-#arr = atleast_1d
 arr = asarray
 gam = special.gamma
 
@@ -111,88 +104,14 @@ class general_cont_ppf(object):
     def __call__(self, q, *args):
         return self.vecfunc(q, *args)
 
+
 # Frozen RV class
 class rv_frozen(object):
-    ''' Frozen continous or discrete 1D Random Variable object (RV)
-
-    RV.rvs(size=1)
-        - random variates
-
-    RV.pdf(x)
-        - probability density function (continous case)
-
-    RV.pmf(x)
-        - probability mass function (discrete case)
-
-    RV.cdf(x)
-        - cumulative density function
-
-    RV.sf(x)
-        - survival function (1-cdf --- sometimes more accurate)
-
-    RV.ppf(q)
-        - percent point function (inverse of cdf --- percentiles)
-
-    RV.isf(q)
-        - inverse survival function (inverse of sf)
-
-    RV.stats(moments='mv')
-        - mean('m',axis=0), variance('v'), skew('s'), and/or kurtosis('k')
-
-    RV.entropy()
-        - (differential) entropy of the RV.
-    '''
-    def __init__(self, dist, *args, **kwds):
-        self.dist = dist
-        loc0, scale0 = map(kwds.get, ['loc', 'scale'])
-        if isinstance(dist,rv_continuous):
-            args, loc0, scale0 = dist.fix_loc_scale(args, loc0, scale0)
-            self.par = args + (loc0, scale0)
-        else: # rv_discrete
-            args, loc0 = dist.fix_loc(args, loc0)
-            self.par = args + (loc0,)
-
-
-    def pdf(self,x):
-        ''' Probability density function at x of the given RV.'''
-        return self.dist.pdf(x,*self.par)
-    def cdf(self,x):
-        '''Cumulative distribution function at x of the given RV.'''
-        return self.dist.cdf(x,*self.par)
-    def ppf(self,q):
-        '''Percent point function (inverse of cdf) at q of the given RV.'''
-        return self.dist.ppf(q,*self.par)
-    def isf(self,q):
-        '''Inverse survival function at q of the given RV.'''
-        return self.dist.isf(q,*self.par)
-    def rvs(self, size=None):
-        '''Random variates of given type.'''
-        kwds = dict(size=size)
-        return self.dist.rvs(*self.par,**kwds)
-    def sf(self,x):
-        '''Survival function (1-cdf) at x of the given RV.'''
-        return self.dist.sf(x,*self.par)
-    def stats(self,moments='mv'):
-        ''' Some statistics of the given RV'''
-        kwds = dict(moments=moments)
-        return self.dist.stats(*self.par,**kwds)
-    def moment(self,n):
-        par1 = self.par[:self.dist.numargs]
-        return self.dist.moment(n,*par1)
-    def entropy(self):
-        return self.dist.entropy(*self.par)
-    def pmf(self,k):
-        '''Probability mass function at k of the given RV'''
-        return self.dist.pmf(k,*self.par)
-
-
-# Frozen RV class
-class rv_frozen_old(object):
     def __init__(self, dist, *args, **kwds):
         self.args = args
         self.kwds = kwds
         self.dist = dist
-    def pdf(self,x):
+    def pdf(self,x):    #raises AttributeError in frozen discrete distribution
         return self.dist.pdf(x,*self.args,**self.kwds)
     def cdf(self,x):
         return self.dist.cdf(x,*self.args,**self.kwds)
@@ -217,849 +136,6 @@ class rv_frozen_old(object):
     def pmf(self,k):
         return self.dist.pmf(k,*self.args,**self.kwds)
 
-
-def ecross(t,f,ind,v):
-    ''' Extracts exact level v crossings
-
-    Parameters
-    -----------
-    t,f : vectors
-        arguments and functions values, respectively.
-    ind : scalar or vector of integers
-        indices to level v crossings as found by findcross.
-    v : scalar or vector (of size(ind))
-        defining the level(s) to cross.
-
-    Returns
-    --------
-    t0 : vector
-        exact level v crossings.
-
-    Description
-    -----------
-    ECROSS interpolates t and f linearly to find the exact level v
-    crossings, i.e., the points where f(t0) = v
-
-    Example
-    -------
-    >>> from matplotlib import pylab as plb
-    >>> t = plb.linspace(0,7*pi,250)
-    >>> x = sin(t);
-    >>> ind = findcross(x,0.75)
-    >>> t0 = ecross(t,x,ind,0.75);
-    >>> plb.plot(t,x,'.',t[ind],x[ind],'r.',t, ones(t.shape)*.75, t0,ones(t0.shape)*0.75,'g.')
-
-    See also
-    --------
-    findcross
-    '''
-    # Tested on: Python 2.5
-    # revised pab Feb2004
-    # By pab 18.06.2001
-
-    return t[ind]+(v-f[ind])*(t[ind+1]-t[ind])/(f[ind+1]-f[ind])
-
-def findcross(x,v=0.0):
-    '''
-    Return indices to level v up and downcrossings of a vector
-
-    Parameters
-    ----------
-    x : vector
-        sampled values.
-    v : scalar
-        crossing level. (Default 0).
-
-    Returns
-    -------
-    ind : vector of integers
-        indices to the crossings in the original sequence x.
-
-    Example
-    -------
-    >>> from matplotlib import pylab as plb
-    >>> v = 0.75
-    >>> t = plb.linspace(0,7*pi,250); x = sin(t);
-    >>> ind = findcross(x,v)
-    >>> plb.plot(t,x,'.',t[ind],x[ind],'r.', t, ones(t.shape)*v)
-
-    See also
-    ---------
-    crossdef
-    '''
-
-    xn = numpy.atleast_1d(x)
-    xn  = numpy.int8(numpy.sign(xn.ravel()-v))
-    ind = None
-    n  = len(xn)
-    if n>1:
-        iz, = numpy.nonzero(xn==0)
-        if any(iz):
-            # Trick to avoid turning points on the crossinglevel.
-            if iz[0]==0:
-                if len(iz)==n:
-                    #warning('All values are equal to crossing level!')
-                    return ind
-
-
-                diz = numpy.diff(iz)
-                ix  = iz((diz>1).argmax())
-                if not any(ix):
-                    ix = iz[-1]
-
-                #x(ix) is a up crossing if  x(1:ix) = v and x(ix+1) > v.
-                #x(ix) is a downcrossing if x(1:ix) = v and x(ix+1) < v.
-                xn[0:ix] = -xn[ix+1]
-                iz = iz[ix::]
-
-            for ix in iz.tolist():
-                xn[ix] = xn[ix-1]
-
-        #% indices to local level crossings ( without turningpoints)
-        #ind, = numpy.nonzero(xn[:n-1]*xn[1:] < 0)
-        ind, = (xn[:n-1]*xn[1:] < 0).nonzero()
-    return ind
-def stirlerr(n):
-    """Return error of Stirling approximation, i.e., log(n!) - log( sqrt(2*pi*n)*(n/exp(1))**n )
-
-    Example
-    -------
-    >>> stirlerr(2)
-    array([ 0.0413407])
-
-    See also
-    ---------
-    binom
-
-
-    Reference
-    -----------
-    Catherine Loader (2000).
-    'Fast and Accurate Computation of Binomial Probabilities'
-    <http://www.citeseer.ist.psu.edu/312695.html>
-    """
-
-    S0 = 0.083333333333333333333   # /* 1/12 */
-    S1 = 0.00277777777777777777778 # /* 1/360 */
-    S2 = 0.00079365079365079365079365 # /* 1/1260 */
-    S3 = 0.000595238095238095238095238 # /* 1/1680 */
-    S4 = 0.0008417508417508417508417508  # /* 1/1188 */
-
-    logical_and = numpy.logical_and
-    atleast_1d = numpy.atleast_1d
-    gammaln = special.gammaln
-    pi = numpy.pi
-    exp = numpy.exp
-    sqrt = numpy.sqrt
-    log = numpy.log
-
-    n1 = atleast_1d(n)
-#    if numpy.isscalar(n):
-#        n1 = asfarray([n])
-#    else:
-#        n1 = asfarray(n)
-
-    y = gammaln(n1+1) - log(sqrt(2*pi*n1)*(n1/exp(1))**n1 )
-
-
-    nn = n1*n1
-
-    n500    = 500<n1
-    y[n500] = (S0-S1/nn[n500])/n1[n500]
-    n80     = logical_and(80<n1 , n1<=500)
-    if any(n80):
-        y[n80]  = (S0-(S1-S2/nn[n80])/nn[n80])/n1[n80]
-    n35     = logical_and(35<n1, n1<=80)
-    if any(n35):
-        nn35   = nn[n35]
-        y[n35] = (S0-(S1-(S2-S3/nn35)/nn35)/nn35)/n1[n35]
-
-    n15      = logical_and(15<n1, n1<=35)
-    if any(n15):
-        nn15   = nn[n15]
-        y[n15] = (S0-(S1-(S2-(S3-S4/nn15)/nn15)/nn15)/nn15)/n1[n15]
-
-    return y
-def bd0(x,npr):
-    """
-    Return deviance term x*log(x/npr) + npr - x
-
-    See also
-    --------
-    stirlerr,
-    binom.pmf,
-    poisson.pmf
-
-    Reference
-    ---------
-    Catherine Loader (2000).
-    'Fast and Accurate Computation of Binomial Probabilities'
-    <http//www.citeseer.ist.psu.edu/312695.html>
-    """
-    def bd0_iter(x,np1):
-        xmnp = x-np1
-        v = (xmnp)/(x+np1)
-        s1 = (xmnp)*v
-        s = np.zeros_like(s1)
-        ej = 2*x*v
-        #v2 = v*v
-        v = v*v
-        j = 0
-        ix, = (s!=s1).nonzero()
-        while ix.size>0:
-            j += 1
-            s[ix]  = s1[ix].copy()
-            ej[ix] = ej[ix]*v[ix]
-            s1[ix] = s[ix]+ej[ix]/(2.*j+1.0)
-            ix, = (s1!=s).nonzero()
-        return s1
-    x1,npr1 = atleast_1d(x,npr)
-    y = x1*log(x1/npr1)+npr1-x1
-    sml = nonzero(abs(x1-npr1)<0.1*(x1+npr1))
-    if sml.size>0:
-        if x1.size!=1:
-            x1 = x1[sml]
-        if npr1.size!=1:
-            npr1 = npr1[sml]
-        y.put(sml,bd0_iter(x1,npr1))
-    return y
-
-
-# internal class to profile parameters of a given distribution
-class Profile(object):
-    ''' Profile Log- likelihood or Product Spacing-function.
-            which can be used for constructing confidence interval for
-            either phat(i), probability or quantile.
-    Call
-    -----
-      Lp = Profile(fit_dist,**kwds)
-
-    Parameters
-    ----------
-    fit_dist : FitDistribution object with ML or MPS estimated distribution parameters.
-
-    **kwds : named arguments with keys
-          i          - Integer defining which distribution parameter to
-                         profile, i.e. which parameter to keep fixed
-                         (default index to first non-fixed parameter)
-          pmin, pmax - Interval for either the parameter, phat(i), prb, or x,
-                        used in the optimization of the profile function (default
-                        is based on the 100*(1-alpha)% confidence interval
-                        computed using the delta method.)
-          N          - Max number of points used in Lp (default 100)
-          x          - Quantile (return value)
-          logSF      - log survival probability,i.e., SF = Prob(X>x;phat)
-          link       - function connecting the quantile (x) and the
-                         survival probability (SF) with the fixed distribution
-                         parameter, i.e.: self.par[i] = link(x,logSF,self.par,i),
-                         where logSF = log(Prob(X>x;phat)).
-                         This means that if:
-                          1) x is not None then x is profiled
-                          2) logSF is not None then logSF is profiled
-                          3) x and logSF both are None then self.par[i] is profiled (default)
-          alpha       - confidence coefficent (default 0.05)
-    Returns
-    -------
-    Lp : Profile log-likelihood function with parameters phat given
-               the data, phat(i), probability (prb) and quantile (x) (if given), i.e.,
-                 Lp = max(log(f(phat|data,phat(i)))),
-               or
-                 Lp = max(log(f(phat|data,phat(i),x,prb)))
-    Member methods
-      plot()
-      get_CI()
-
-    Member variables
-      fit_dist - fitted data object.
-      data - profile function values
-      args - profile function arguments
-      alpha - confidence coefficient
-      Lmax - Maximum value of profile function
-      alpha_cross_level -
-
-    PROFILE is a utility function for making inferences either on a particular
-    component of the vector phat or the quantile, x, or the probability, SF.
-    This is usually more accurate than using the delta method assuming
-    asymptotic normality of the ML estimator or the MPS estimator.
-
-
-    Examples
-    --------
-    #MLE and better CI for phat.par[0]
-    >>> import numpy as np
-    >>> R = weibull_min.rvs(1,size=100);
-    >>> phat = weibull_min.fit(R,1,1,par_fix=[np.nan,0.,np.nan])
-    >>> Lp = Profile(phat,i=0)
-    >>> Lp.plot()
-    >>> Lp.get_CI(alpha=0.1)
-    >>> SF = 1./990
-    >>> x = phat.isf(SF)
-
-    # CI for x
-    >>> Lx = phat.profile(i=1,x=x,link=phat.dist.link)
-    >>> Lx.plot()
-    >>> Lx.get_CI(alpha=0.2)
-
-    # CI for logSF=log(SF)
-    >>> Lpr = phat.profile(i=1,logSF=log(SF),link = phat.dist.link)
-
-
-    '''
-    def __init__(self, fit_dist, **kwds):
-        self.fit_dist = fit_dist
-        self.data = None
-        self.args = None
-        self.title = 'Profile log'
-        self.xlabel = ''
-        self.ylabel = ''
-        self.i_fixed, self.N, self.alpha, self.pmin,self.pmax,self.x,self.logSF,self.link = map(kwds.get,
-                            ['i','N','alpha','pmin','pmax','x','logSF','link'],
-                            [0,100,0.05,None,None,None,None,None])
-
-        self.ylabel = '%g%s CI' % (100*(1.0-self.alpha), '%')
-        if fit_dist.method.startswith('ml'):
-            self.title = self.title + 'likelihood'
-            Lmax = fit_dist.LLmax
-        elif fit_dist.method.startswith('mps'):
-            self.title = self.title + ' product spacing'
-            Lmax = fit_dist.LPSmax
-        else:
-            raise ValueError("PROFILE is only valid for ML- or MPS- estimators")
-        if fit_dist.par_fix==None:
-            isnotfixed = valarray(fit_dist.par.shape,True)
-        else:
-            isnotfixed = 1-numpy.isfinite(fit_dist.par_fix)
-
-        self.i_notfixed = nonzero(isnotfixed)
-
-        self.i_fixed = atleast_1d(self.i_fixed)
-
-        if 1-isnotfixed[self.i_fixed]:
-            raise ValueError("Index i must be equal to an index to one of the free parameters.")
-
-        isfree = isnotfixed
-        isfree[self.i_fixed] = False
-        self.i_free = nonzero(isfree)
-
-        self.Lmax = Lmax
-        self.alpha_Lrange = 0.5*chi2.isf(self.alpha,1)
-        self.alpha_cross_level = Lmax - self.alpha_Lrange
-        lowLevel = self.alpha_cross_level-self.alpha_Lrange/7.0
-
-        ## Check that par are actually at the optimum
-        phatv = fit_dist.par.copy()
-        self._par = phatv.copy()
-        phatfree = phatv[self.i_free].copy()
-
-
-        ## Set up variable to profile and _local_link function
-
-        self.profile_x = not self.x==None
-        self.profile_logSF = not (self.logSF==None or self.profile_x)
-        self.profile_par = not (self.profile_x or self.profile_logSF)
-
-        if self.link==None:
-            self.link = self.fit_dist.dist.link
-        if self.profile_par:
-            self._local_link = lambda fix_par, par : fix_par
-            self.xlabel = 'phat(%d)'% self.i_fixed
-            p_opt = self._par[self.i_fixed]
-        elif self.profile_x:
-            self.logSF = log(fit_dist.sf(self.x))
-            self._local_link = lambda fix_par, par : self.link(fix_par,self.logSF,par,self.i_fixed)
-            self.xlabel = 'x'
-            p_opt = self.x
-        elif self.profile_logSF:
-            p_opt = self.logSF
-            self.x = fit_dist.isf(exp(p_opt))
-            self._local_link = lambda fix_par, par : self.link(self.x,fix_par,par,self.i_fixed)
-            self.xlabel= 'log(R)'
-        else:
-            raise ValueError("You must supply a non-empty quantile (x) or probability (logSF) in order to profile it!")
-
-        self.xlabel = self.xlabel + ' (' + fit_dist.dist.name + ')'
-
-        pvec = self._get_pvec(p_opt)
-
-
-        mylogfun = self._nlogfun
-        self.data = numpy.empty_like(pvec)
-        self.data[:] = nan
-        k1 = (pvec>=p_opt).argmax()
-        for ix in xrange(k1,-1,-1):
-            phatfree = optimize.fmin(mylogfun,phatfree,args =(pvec[ix],) ,disp=0)
-            self.data[ix] = -mylogfun(phatfree,pvec[ix])
-            if self.data[ix]<self.alpha_cross_level:
-                pvec[:ix] = nan
-                break
-
-        phatfree = phatv[self.i_free].copy()
-        for ix in xrange(k1+1,pvec.size):
-            phatfree = optimize.fmin(mylogfun,phatfree,args =(pvec[ix],) ,disp=0)
-            self.data[ix] = -mylogfun(phatfree,pvec[ix])
-            if self.data[ix]<self.alpha_cross_level:
-                pvec[ix+1:] = nan
-                break
-
-        # prettify result
-        ix = nonzero(numpy.isfinite(pvec))
-        self.data = self.data[ix]
-        self.args = pvec[ix]
-        cond =self.data==-numpy.inf
-        if any(cond):
-            ind, = cond.nonzero()
-            self.data.put(ind, numpy.finfo(float).min/2.0)
-            ind1 = numpy.where(ind==0,ind,ind-1)
-            cl = self.alpha_cross_level-self.alpha_Lrange/2.0
-            t0 = ecross(self.args,self.data,ind1,cl)
-
-            self.data.put(ind,cl)
-            self.args.put(ind,t0)
-
-
-    def _get_pvec(self,p_opt):
-        ''' return proper interval for the variable to profile
-        '''
-
-        linspace = numpy.linspace
-        if self.pmin==None or self.pmax==None:
-
-            if self.profile_par:
-                pvar = self.fit_dist.par_cov[self.i_fixed,:][:,self.i_fixed]
-            else:
-                i_notfixed = self.i_notfixed
-                phatv = self._par
-
-                if self.profile_x:
-                    gradfun = numdifftools.Gradient(self._myinvfun)
-                else:
-                    gradfun = numdifftools.Gradient(self._myprbfun)
-                drl = gradfun(phatv[self.i_notfixed])
-
-                pcov = self.fit_dist.par_cov[i_notfixed,:][:,i_notfixed]
-                pvar = sum(numpy.dot(drl,pcov)*drl)
-
-            p_crit = norm.isf(self.alpha/2.0)*sqrt(numpy.ravel(pvar))*1.5
-            if self.pmin==None:
-                self.pmin = p_opt-5.0*p_crit
-            if self.pmax==None:
-                self.pmax = p_opt+5.0*p_crit
-
-            N4 = numpy.floor(self.N/4.0)
-
-            pvec1 = linspace(self.pmin,p_opt-p_crit,N4+1)
-            pvec2 = linspace(p_opt-p_crit,p_opt+p_crit,self.N-2*N4)
-            pvec3 = linspace(p_opt+p_crit,self.pmax,N4+1)
-            pvec = numpy.unique(numpy.hstack((pvec1,p_opt,pvec2,pvec3)))
-
-        else:
-            pvec = linspace(self.pmin,self.pmax,self.N)
-        return pvec
-    def  _myinvfun(self,phatnotfixed):
-        mphat = self._par.copy()
-        mphat[self.i_notfixed] = phatnotfixed;
-        prb = exp(self.logSF)
-        return self.fit_dist.dist.isf(prb,*mphat);
-
-    def _myprbfun(phatnotfixed):
-        mphat = self._par.copy()
-        mphat[self.i_notfixed] = phatnotfixed;
-        return self.fit_dist.dist.sf(self.x,*mphat);
-
-
-    def _nlogfun(self,free_par,fix_par):
-        ''' Return negative of loglike or logps function
-
-           free_par - vector of free parameters
-           fix_par  - fixed parameter, i.e., either quantile (return level),
-                      probability (return period) or distribution parameter
-
-        '''
-        par = self._par
-        par[self.i_free] = free_par
-        # _local_link: connects fixed quantile or probability with fixed distribution parameter
-        par[self.i_fixed] = self._local_link(fix_par,par)
-        return self.fit_dist.fitfun(par)
-
-    def get_CI(self,alpha=0.05):
-        '''Return confidence interval
-        '''
-        if alpha<self.alpha:
-            raise ValueError('Unable to return CI with alpha less than %g' % self.alpha)
-
-        cross_level = self.Lmax - 0.5*chi2.isf(alpha,1)
-        ind = findcross(self.data,cross_level)
-        N = len(ind)
-        if N==0:
-            #Warning('upper bound for XXX is larger'
-            #Warning('lower bound for XXX is smaller'
-            CI = (self.pmin,self.pmax)
-        elif N==1:
-            x0 = ecross(self.args,self.data,ind,cross_level)
-            isUpcrossing = self.data[ind]>self.data[ind+1]
-            if isUpcrossing:
-                CI = (x0,self.pmax)
-                #Warning('upper bound for XXX is larger'
-            else:
-                CI = (self.pmin,x0)
-                #Warning('lower bound for XXX is smaller'
-
-        elif N==2:
-            CI = ecross(self.args,self.data,ind,cross_level)
-        else:
-            # Warning('Number of crossings too large!')
-            CI = ecross(self.args,self.data,ind[[0,-1]],cross_level)
-        return CI
-
-    def plot(self):
-        ''' Plot profile function with 100(1-alpha)% CI
-        '''
-        plotbackend.plot(self.args,self.data,
-            self.args[[0,-1]],[self.Lmax,]*2,'r',
-            self.args[[0,-1]],[self.alpha_cross_level,]*2,'r')
-        plotbackend.title(self.title)
-        plotbackend.ylabel(self.ylabel)
-        plotbackend.xlabel(self.xlabel)
-
-# internal class to fit given distribution to data
-class FitDistribution(rv_frozen):
-    def __init__(self, dist, data, *args, **kwds):
-        extradoc = '''
-
-    RV.plotfitsumry() - Plot various diagnostic plots to asses quality of fit.
-    RV.plotecdf()     - Plot Empirical and fitted Cumulative Distribution Function
-    RV.plotesf()      - Plot Empirical and fitted Survival Function
-    RV.plotepdf()     - Plot Empirical and fitted Probability Distribution Function
-    RV.plotresq()     - Displays a residual quantile plot.
-    RV.plotresprb()   - Displays a residual probability plot.
-
-    RV.profile()      - Return Profile Log- likelihood or Product Spacing-function.
-
-    Member variables:
-        data - data used in fitting
-        alpha - confidence coefficient
-        method - method used
-        LLmax  - loglikelihood function evaluated using par
-        LPSmax - log product spacing function evaluated using par
-        pvalue - p-value for the fit
-        search - True if search for distribution parameters (default)
-        copydata - True if copy input data (default)
-
-        par     - parameters (fixed and fitted)
-        par_cov - covariance of parameters
-        par_fix - fixed parameters
-        par_lower - lower (1-alpha)% confidence bound for the parameters
-        par_upper - upper (1-alpha)% confidence bound for the parameters
-
-        '''
-        self.__doc__ = rv_frozen.__doc__ + extradoc
-        self.dist = dist
-        numargs = dist.numargs
-
-        self.method, self.alpha, self.par_fix, self.search, self.copydata= map(kwds.get,['method','alpha','par_fix','search','copydata'],['ml',0.05,None,True,True])
-        self.data = ravel(data)
-        if self.copydata:
-            self.data = self.data.copy()
-        self.data.sort()
-        if self.method.lower()[:].startswith('mps'):
-            self._fitfun = dist.nlogps
-        else:
-            self._fitfun = dist.nnlf
-
-        allfixed  = False
-        isfinite = numpy.isfinite
-        somefixed = (self.par_fix !=None) and any(isfinite(self.par_fix))
-
-        if somefixed:
-            fitfun = self._fxfitfun
-            self.par_fix = tuple(self.par_fix)
-            allfixed = all(isfinite(self.par_fix))
-            self.par = atleast_1d(self.par_fix)
-            self.i_notfixed = nonzero(1-isfinite(self.par))
-            self.i_fixed  = nonzero(isfinite(self.par))
-            if len(self.par) != numargs+2:
-                raise ValueError, "Wrong number of input arguments."
-            if len(args)!=len(self.i_notfixed):
-                raise ValueError("Length of args must equal number of non-fixed parameters given in par_fix! (%d) " % len(self.i_notfixed))
-            x0 = atleast_1d(args)
-        else:
-            fitfun = self.fitfun
-            loc0, scale0 = map(kwds.get, ['loc', 'scale'])
-            args, loc0, scale0 = dist.fix_loc_scale(args, loc0, scale0)
-            Narg = len(args)
-            if Narg != numargs:
-                if Narg > numargs:
-                    raise ValueError, "Too many input arguments."
-                else:
-                    args += (1.0,)*(numargs-Narg)
-            # location and scale are at the end
-            x0 = args + (loc0, scale0)
-            x0 = atleast_1d(x0)
-
-        numpar = len(x0)
-        if self.search and not allfixed:
-            #args=(self.data,),
-            par = optimize.fmin(fitfun,x0,disp=0)
-            if not somefixed:
-                self.par = par
-        elif  (not allfixed) and somefixed:
-            self.par[self.i_notfixed] = x0
-        else:
-            self.par = x0
-
-        np = numargs+2
-
-        self.par_upper = None
-        self.par_lower = None
-        self.par_cov = zeros((np,np))
-        self.LLmax = -dist.nnlf(self.par,self.data)
-        self.LPSmax = -dist.nlogps(self.par,self.data)
-        self.pvalue = dist.pvalue(self.par,self.data,unknown_numpar=numpar)
-        H = numpy.asmatrix(dist.hessian_nnlf(self.par,self.data))
-        self.H = H
-        try:
-            if allfixed:
-                pass
-            elif somefixed:
-                pcov = -pinv2(H[self.i_notfixed,:][...,self.i_notfixed])
-                for row,ix in enumerate(list(self.i_notfixed)):
-                    self.par_cov[ix,self.i_notfixed] = pcov[row,:]
-
-            else:
-                self.par_cov = -pinv2(H)
-        except:
-            self.par_cov[:,:] = nan
-
-        pvar = numpy.diag(self.par_cov)
-        zcrit = -norm.ppf(self.alpha/2.0)
-        self.par_lower = self.par-zcrit*sqrt(pvar)
-        self.par_upper = self.par+zcrit*sqrt(pvar)
-
-    def fitfun(self,phat):
-        return self._fitfun(phat,self.data)
-
-    def _fxfitfun(self,phat10):
-        self.par[self.i_notfixed] = phat10
-        return self._fitfun(self.par,self.data)
-
-
-    def profile(self,**kwds):
-        ''' Profile Log- likelihood or Log Product Spacing- function,
-            which can be used for constructing confidence interval for
-            either phat(i), probability or quantile.
-
-        CALL:  Lp = RV.profile(**kwds)
-
-
-       RV = object with ML or MPS estimated distribution parameters.
-       Parameters
-       ----------
-       **kwds : named arguments with keys:
-          i          - Integer defining which distribution parameter to
-                         profile, i.e. which parameter to keep fixed
-                         (default index to first non-fixed parameter)
-          pmin, pmax - Interval for either the parameter, phat(i), prb, or x,
-                        used in the optimization of the profile function (default
-                        is based on the 100*(1-alpha)% confidence interval
-                        computed using the delta method.)
-          N          - Max number of points used in Lp (default 100)
-          x          - Quantile (return value)
-          logSF       - log survival probability,i.e., R = Prob(X>x;phat)
-          link       - function connecting the quantile (x) and the
-                         survival probability (R) with the fixed distribution
-                         parameter, i.e.: self.par[i] = link(x,logSF,self.par,i),
-                         where logSF = log(Prob(X>x;phat)).
-                         This means that if:
-                          1) x is not None then x is profiled
-                          2) logSF is not None then logSF is profiled
-                          3) x and logSF both are None then self.par[i] is profiled (default)
-          alpha       - confidence coefficent (default 0.05)
-       Returns
-       --------
-         Lp = Profile log-likelihood function with parameters phat given
-               the data, phat(i), probability (prb) and quantile (x) (if given), i.e.,
-                 Lp = max(log(f(phat|data,phat(i)))),
-               or
-                 Lp = max(log(f(phat|data,phat(i),x,prb)))
-
-          PROFILE is a utility function for making inferences either on a particular
-          component of the vector phat or the quantile, x, or the probability, R.
-          This is usually more accurate than using the delta method assuming
-          asymptotic normality of the ML estimator or the MPS estimator.
-
-
-          Examples
-          --------
-          # MLE and better CI for phat.par[0]
-          >>> R = weibull_min.rvs(1,size=100);
-          >>> phat = weibull_min.fit(R)
-          >>> Lp = phat.profile(i=0)
-          >>> Lp.plot()
-          >>> Lp.get_CI(alpha=0.1)
-          >>> R = 1./990
-          >>> x = phat.isf(R)
-
-          # CI for x
-          >>> Lx = phat.profile(i=1,x=x,link=phat.dist.link)
-          >>> Lx.plot()
-          >>> Lx.get_CI(alpha=0.2)
-
-          # CI for logSF=log(SF)
-          >>> Lpr = phat.profile(i=1,logSF=log(R),link = phat.dist.link)
-
-          See also
-          --------
-          Profile
-        '''
-        if not self.par_fix==None:
-            i1 = kwds.setdefault('i',(1-numpy.isfinite(self.par_fix)).argmax())
-
-        return Profile(self,**kwds)
-
-
-
-    def plotfitsumry(self):
-        ''' Plot various diagnostic plots to asses the quality of the fit.
-
-        PLOTFITSUMRY displays probability plot, density plot, residual quantile
-        plot and residual probability plot.
-        The purpose of these plots is to graphically assess whether the data
-        could come from the fitted distribution. If so the empirical- CDF and PDF
-        should follow the model and the residual plots will be linear. Other
-        distribution types will introduce curvature in the residual plots.
-        '''
-        plotbackend.subplot(2,2,1)
-        #self.plotecdf()
-        self.plotesf()
-        plotbackend.subplot(2,2,2)
-        self.plotepdf()
-        plotbackend.subplot(2,2,3)
-        self.plotresprb()
-        plotbackend.subplot(2,2,4)
-        self.plotresq()
-        fixstr = ''
-        if not self.par_fix==None:
-            numfix = len(self.i_fixed)
-            if numfix>0:
-                format = '%d,'*numfix
-                format = format[:-1]
-                format1 = '%g,'*numfix
-                format1 = format1[:-1]
-                phatistr = format % tuple(self.i_fixed)
-                phatvstr = format1 % tuple(self.par[self.i_fixed])
-                fixstr = 'Fixed: phat[%s] = %s ' % (phatistr,phatvstr)
-
-
-        infostr = 'Fit method: %s, Fit p-value: %2.2f %s' % (self.method,self.pvalue,fixstr)
-        try:
-            plotbackend.figtext(0.05,0.01,infostr)
-        except:
-            pass
-
-    def plotesf(self):
-        '''  Plot Empirical and fitted Survival Function
-
-        The purpose of the plot is to graphically assess whether
-        the data could come from the fitted distribution.
-        If so the empirical CDF should resemble the model CDF.
-        Other distribution types will introduce deviations in the plot.
-        '''
-        n = len(self.data)
-        SF = (arange(n,0,-1))/n
-        plotbackend.semilogy(self.data,SF,'b.',self.data,self.sf(self.data),'r-')
-        #plotbackend.plot(self.data,SF,'b.',self.data,self.sf(self.data),'r-')
-
-        plotbackend.xlabel('x');
-        plotbackend.ylabel('F(x) (%s)' % self.dist.name)
-        plotbackend.title('Empirical SF plot')
-
-    def plotecdf(self):
-        '''  Plot Empirical and fitted Cumulative Distribution Function
-
-        The purpose of the plot is to graphically assess whether
-        the data could come from the fitted distribution.
-        If so the empirical CDF should resemble the model CDF.
-        Other distribution types will introduce deviations in the plot.
-        '''
-        n = len(self.data)
-        F = (arange(1,n+1))/n
-        plotbackend.plot(self.data,F,'b.',self.data,self.cdf(self.data),'r-')
-
-
-        plotbackend.xlabel('x');
-        plotbackend.ylabel('F(x) (%s)' % self.dist.name)
-        plotbackend.title('Empirical CDF plot')
-
-    def plotepdf(self):
-        '''Plot Empirical and fitted Probability Density Function
-
-        The purpose of the plot is to graphically assess whether
-        the data could come from the fitted distribution.
-        If so the histogram should resemble the model density.
-        Other distribution types will introduce deviations in the plot.
-        '''
-
-        bin,limits = numpy.histogram(self.data,normed=True,new=True)
-        limits.shape = (-1,1)
-        xx = limits.repeat(3,axis=1)
-        xx.shape = (-1,)
-        xx = xx[1:-1]
-        bin.shape = (-1,1)
-        yy = bin.repeat(3,axis=1)
-        #yy[0,0] = 0.0 # pdf
-        yy[:,0] = 0.0 # histogram
-        yy.shape = (-1,)
-        yy = numpy.hstack((yy,0.0))
-
-        #plotbackend.hist(self.data,normed=True,fill=False)
-        plotbackend.plot(self.data,self.pdf(self.data),'r-',xx,yy,'b-')
-
-        plotbackend.xlabel('x');
-        plotbackend.ylabel('f(x) (%s)' % self.dist.name)
-        plotbackend.title('Density plot')
-
-
-    def plotresq(self):
-        '''PLOTRESQ displays a residual quantile plot.
-
-        The purpose of the plot is to graphically assess whether
-        the data could come from the fitted distribution. If so the
-        plot will be linear. Other distribution types will introduce
-        curvature in the plot.
-        '''
-        n=len(self.data)
-        eprob = (arange(1,n+1)-0.5)/n
-        y = self.ppf(eprob)
-        y1 = self.data[[0,-1]]
-        plotbackend.plot(self.data,y,'b.',y1,y1,'r-')
-
-        plotbackend.xlabel('Empirical')
-        plotbackend.ylabel('Model (%s)' % self.dist.name)
-        plotbackend.title('Residual Quantile Plot');
-        plotbackend.axis('tight')
-        plotbackend.axis('equal')
-
-
-    def plotresprb(self):
-        ''' PLOTRESPRB displays a residual probability plot.
-
-        The purpose of the plot is to graphically assess whether
-        the data could come from the fitted distribution. If so the
-        plot will be linear. Other distribution types will introduce curvature in the plot.
-        '''
-        n = len(self.data);
-        #ecdf = (0.5:n-0.5)/n;
-        ecdf = arange(1,n+1)/(n+1)
-        mcdf = self.cdf(self.data)
-        p1 = [0,1]
-        plotbackend.plot(ecdf,mcdf,'b.',p1,p1,'r-')
-
-
-        plotbackend.xlabel('Empirical')
-        plotbackend.ylabel('Model (%s)' % self.dist.name)
-        plotbackend.title('Residual Probability Plot');
-        plotbackend.axis([0, 1, 0, 1])
-        plotbackend.axis('equal')
 
 
 ##  NANs are returned for unsupported parameters.
@@ -1160,125 +236,24 @@ def valarray(shape,value=nan,typecode=None):
         out = asarray(out)
     return out
 
-# # This should be rewritten
-##def argsreduce(cond, *args):
-##    """Return a sequence of arguments converted to the dimensions of cond
-##    """
-##    newargs = list(args)
-##    expand_arr = (cond==cond)
-##    for k in range(len(args)):
-##        # make sure newarr is not a scalar
-##        newarr = atleast_1d(args[k])
-##        newargs[k] = extract(cond,newarr*expand_arr)
-##    return newargs
-
-
+# This should be rewritten
 def argsreduce(cond, *args):
-    """ Return the sequence of ravel(args[i]) where ravel(condition) is True in 1D
-
-    Example
-      >>> import numpy as np
-      >>> rand = np.random.random_sample
-      >>> A = rand((4,5))
-      >>> B = 2
-      >>> C = rand((1,5))
-      >>> cond = np.ones(A.shape)
-      >>> [A1,B1,C1] = argsreduce(cond,A,B,C)
-      >>> B1.shape
-      (20,)
-      >>> cond[2,:] = 0
-      >>> [A2,B2,C2] = argsreduce(cond,A,B,C)
-      >>> B2.shape
-      (15,)
-
+    """Return a sequence of arguments converted to the dimensions of cond
     """
-
-    newargs = atleast_1d(*args)
-    if not isinstance(newargs,list):
-        newargs = [newargs,]
+    newargs = list(args)
     expand_arr = (cond==cond)
-    return [extract(cond,arr1*expand_arr) for arr1 in newargs]
-
-
-def common_shape(*args,**kwds):
-    ''' Return the common shape of a sequence of arrays
-
-    Parameters
-    -----------
-    *args : arraylike
-        sequence of arrays
-    **kwds :
-        shape
-
-    Returns
-    -------
-    shape : tuple
-        common shape of the elements of args.
-
-    Raises
-    ------
-    An error is raised if some of the arrays do not conform
-    to the common shape according to the broadcasting rules in numpy.
-
-    Examples
-    --------
-    >>> import numpy as np
-    >>> A = np.ones((4,1))
-    >>> B = 2
-    >>> C = np.ones((1,5))*5
-    >>> common_shape(A,B,C)
-    (4, 5)
-    >>> common_shape(A,B,C,shape=(3,4,1))
-    (3, 4, 5)
-
-    See also
-    --------
-    broadcast, broadcast_arrays
-    '''
-
-
-    shape = kwds.get('shape')
-    argsout = atleast_1d(*args)
-    if not isinstance(argsout,list):
-        argsout = [argsout,]
-    args_shape = [arg.shape for arg in argsout] #map(shape, varargout)
-    if shape!=None:
-        if not isinstance(shape,(list,tuple)):
-            shape = (shape,)
-        args_shape.append(tuple(shape))
-
-    if len(set(args_shape))==1:
-        # Common case
-        return tuple(args_shape[0])
-
-    ndims = map(len, args_shape)
-    ndim = max(ndims)
-    Np = len(args_shape)
-
-    all_shapes = ones((Np, ndim),dtype=int)
-    for ix, Nt in enumerate(ndims):
-        all_shapes[ix, ndim-Nt::] = args_shape[ix]
-
-    ndims = atleast_1d(ndims)
-    if any(ndims == 0):
-        all_shapes[ndims == 0, :] = 0
-
-    comn_shape = all_shapes.max(axis=0)
-
-    arrays_do_not_conform2common_shape = any(logical_and(all_shapes!=comn_shape[newaxis,...], all_shapes!=1),axis=1)
-
-    if any(arrays_do_not_conform2common_shape):
-        raise ValueError('Non-scalar input arguments do not match in shape according to numpy broadcasting rules')
-
-    return tuple(comn_shape)
-
+    for k in range(len(args)):
+        # make sure newarr is not a scalar
+        newarr = atleast_1d(args[k])
+        newargs[k] = extract(cond,newarr*expand_arr)
+    return newargs
 
 class rv_generic(object):
     """Class which encapsulates common functionality between rv_discrete
     and rv_continuous.
 
     """
-    def fix_loc_scale(self, args, loc, scale=1):
+    def _fix_loc_scale(self, args, loc, scale=1):
         N = len(args)
         if N > self.numargs:
             if N == self.numargs + 1 and loc is None:
@@ -1294,31 +269,39 @@ class rv_generic(object):
             loc = 0.0
         return args, loc, scale
 
-    def fix_loc(self, args, loc):
-        args, loc, scale = self.fix_loc_scale(args, loc)
+    def _fix_loc(self, args, loc):
+        args, loc, scale = self._fix_loc_scale(args, loc)
         return args, loc
 
     # These are actually called, and should not be overwritten if you
     # want to keep error checking.
     def rvs(self,*args,**kwds):
-        """Random variates of given type.
+        """
+        Random variates of given type.
 
-        *args
-        =====
-        The shape parameter(s) for the distribution (see docstring of the
-           instance object for more information)
+        Parameters
+        ----------
+        arg1, arg2, arg3,... : array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+        loc : array-like, optional
+            location parameter (default=0)
+        scale : array-like, optional
+            scale parameter (default=1)
+        size : int or tuple of ints, optional
+            defining number of random variates (default=1)
 
-        **kwds
-        ======
-        size  - number of random variates (default=1)
-        loc   - location parameter (default=0)
-        scale - scale parameter (default=1)
+        Returns
+        -------
+        rvs : array-like
+            random variates of given `size`
+
         """
         kwd_names = ['loc', 'scale', 'size', 'discrete']
         loc, scale, size, discrete = map(kwds.get, kwd_names,
                                          [None]*len(kwd_names))
 
-        args, loc, scale = self.fix_loc_scale(args, loc, scale)
+        args, loc, scale = self._fix_loc_scale(args, loc, scale)
         cond = logical_and(self._argcheck(*args),(scale >= 0))
         if not all(cond):
             raise ValueError, "Domain error in arguments."
@@ -1346,32 +329,18 @@ class rv_generic(object):
 
         return vals
 
-##
-##        loc,scale = map(arr,(loc,scale))
-##        args = tuple(map(arr,args))
-##
-##
-##        cshape = common_shape(loc,scale,shape=size,*args)
-##        #self._size = product(cshape)
-##        self._size = cshape
-##
-##        vals = self._rvs(*args)
-##
-##        return vals * scale + loc
-
 
 class rv_continuous(rv_generic):
-    """A Generic continuous random variable.
+    """
+    A Generic continuous random variable.
 
-    Continuous random variables are defined from a standard form chosen
-    for simplicity of representation.  The standard form may require
-    some shape parameters to complete its specification.  The distributions
-    also take optional location and scale parameters using loc= and scale=
-    keywords (defaults: loc=0, scale=1)
+    Continuous random variables are defined from a standard form and may
+    require some shape parameters to complete its specification.  Any
+    optional keyword parameters can be passed to the methods of the RV
+    object as given below:
 
-    These shape, scale, and location parameters can be passed to any of the
-    methods of the RV object such as the following:
-
+    Methods
+    -------
     generic.rvs(<shape(s)>,loc=0,scale=1,size=1)
         - random variates
 
@@ -1391,44 +360,60 @@ class rv_continuous(rv_generic):
         - inverse survival function (inverse of sf)
 
     generic.stats(<shape(s)>,loc=0,scale=1,moments='mv')
-        - mean('m',axis=0), variance('v'), skew('s'), and/or kurtosis('k')
+        - mean('m'), variance('v'), skew('s'), and/or kurtosis('k')
 
     generic.entropy(<shape(s)>,loc=0,scale=1)
         - (differential) entropy of the RV.
 
-    myrv = generic.fit(data,<shape(s)>,loc=0,scale=1,method='ml', par_fix=None, alpha=0.05)
-         - Parameter estimates for generic data returned in a frozen RV object
+    generic.fit(data,<shape(s)>,loc=0,scale=1)
+        - Parameter estimates for generic data
 
-    Alternatively, the object may be called (as a function) to fix
-       the shape, location, and scale parameters returning a
-       "frozen" continuous RV object:
+    Alternatively, the object may be called (as a function) to fix the shape,
+    location, and scale parameters returning a "frozen" continuous RV object:
 
-    myrv = generic(<shape(s)>,loc=0,scale=1)
-        - frozen RV object with the same methods but holding the
-            given shape, location, and scale fixed
+    rv = generic(<shape(s)>,loc=0,scale=1)
+        - frozen RV object with the same methods but holding the given shape, location, and scale fixed
 
-    Examples:
-    # Random number generation
+    Parameters
+    ----------
+    x : array-like
+        quantiles
+    q : array-like
+        lower or upper tail probability
+    <shape(s)> : array-like
+        shape parameters
+    loc : array-like, optional
+        location parameter (default=0)
+    scale : array-like, optional
+        scale parameter (default=1)
+    size : int or tuple of ints, optional
+        shape of random variates (default computed from input arguments )
+    moments : string, optional
+        composed of letters ['mvsk'] specifying which moments to compute where
+        'm' = mean, 'v' = variance, 's' = (Fisher's) skew and
+        'k' = (Fisher's) kurtosis. (default='mv')
+
+    Examples
+    --------
+
     >>> import matplotlib.pyplot as plt
     >>> numargs = generic.numargs
     >>> [ <shape(s)> ] = [0.9,]*numargs
+    >>> rv = generic(<shape(s)>)
+
+    Display frozen pdf
+
+    >>> x = np.linspace(0,np.minimum(rv.dist.b,3))
+    >>> h=plt.plot(x,rv.pdf(x))
+
+    Check accuracy of cdf and ppf
+
+    >>> prb = generic.cdf(x,<shape(s)>)
+    >>> h=plt.semilogy(np.abs(x-generic.ppf(prb,c))+1e-20)
+
+    Random number generation
+
     >>> R = generic.rvs(<shape(s)>,size=100)
-
-    # Compare ML and MPS method
-    >>> phat = generic.fit(R,method='ml');
-    >>> phat.plotfitsumry();  plt.figure(plt.gcf().number+1)
-    >>> phat2 = generic.fit(R,method='mps')
-    >>> phat2.plotfitsumry(); plt.figure(plt.gcf().number+1)
-
-    #Fix loc=0 and estimate shapes and scale
-    >>> fix_par = tuple([nan]*numargs + [0,nan])
-    >>> phat3 = generic.fit(R,<shape(s)>,1,par_fix=fix_par, method='mps')
-    >>> phat3.plotfitsumry(); plt.figure(plt.gcf().number+1)
-
-    #Accurate confidence interval with profile loglikelihood
-    >>> lp = phat3.profile()
-    >>> lp.plot()
-    >>> lp.get_CI()
 
     """
     def __init__(self, momtype=1, a=None, b=None, xa=-10.0, xb=10.0,
@@ -1486,6 +471,7 @@ class rv_continuous(rv_generic):
         if self.__doc__ is None:
             self.__doc__ = rv_continuous.__doc__
         if self.__doc__ is not None:
+            self.__doc__ = textwrap.dedent(self.__doc__)
             if longname is not None:
                 self.__doc__ = self.__doc__.replace("A Generic",longname)
             if name is not None:
@@ -1495,7 +481,7 @@ class rv_continuous(rv_generic):
             else:
                 self.__doc__ = self.__doc__.replace("<shape(s)>",shapes)
             if extradoc is not None:
-                self.__doc__ = self.__doc__ + extradoc
+                self.__doc__ += textwrap.dedent(extradoc)
 
     def _ppf_to_solve(self, x, q,*args):
         return apply(self.cdf, (x, )+args)-q
@@ -1507,16 +493,13 @@ class rv_continuous(rv_generic):
     def _mom_integ0(self, x,m,*args):
         return x**m * self.pdf(x,*args)
     def _mom0_sc(self, m,*args):
-        return quad(self._mom_integ0, self.a,
+        return scipy.integrate.quad(self._mom_integ0, self.a,
                                     self.b, args=(m,)+args)[0]
-    #        return scipy.integrate.quad(self._mom_integ0, self.a,
-    #                                    self.b, args=(m,)+args)[0]
     # moment calculated using ppf
     def _mom_integ1(self, q,m,*args):
         return (self.ppf(q,*args))**m
     def _mom1_sc(self, m,*args):
-        return quad(self._mom_integ1, 0, 1,args=(m,)+args)[0]
-        #return scipy.integrate.quad(self._mom_integ1, 0, 1,args=(m,)+args)[0]
+        return scipy.integrate.quad(self._mom_integ1, 0, 1,args=(m,)+args)[0]
 
     ## These are the methods you must define (standard form functions)
     def _argcheck(self, *args):
@@ -1539,8 +522,7 @@ class rv_continuous(rv_generic):
         return Y
 
     def _cdf_single_call(self, x, *args):
-        return quad(self._pdf, self.a, x, args=args)[0]
-    #return scipy.integrate.quad(self._pdf, self.a, x, args=args)[0]
+        return scipy.integrate.quad(self._pdf, self.a, x, args=args)[0]
 
     def _cdf(self, x, *args):
         return self.veccdf(x,*args)
@@ -1548,16 +530,13 @@ class rv_continuous(rv_generic):
     def _sf(self, x, *args):
         return 1.0-self._cdf(x,*args)
 
-    def _chf(self,x,*args):
-        return -log1p(-self._cdf(x,*args))
-
     def _ppf(self, q, *args):
         return self.vecfunc(q,*args)
 
     def _isf(self, q, *args):
         return self._ppf(1.0-q,*args) #use correct _ppf for subclasses
 
-    # The actual calcuation functions (no basic checking need be done)
+    # The actual cacluation functions (no basic checking need be done)
     #  If these are defined, the others won't be looked at.
     #  Otherwise, the other set can be defined.
     def _stats(self,*args, **kwds):
@@ -1569,20 +548,29 @@ class rv_continuous(rv_generic):
         return self.generic_moment(n,*args)
 
     def pdf(self,x,*args,**kwds):
-        """Probability density function at x of the given RV.
+        """
+        Probability density function at x of the given RV.
 
-        *args
-        =====
-        The shape parameter(s) for the distribution (see docstring of the
-           instance object for more information)
+        Parameters
+        ----------
+        x : array-like
+            quantiles
+        arg1, arg2, arg3,... : array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+        loc : array-like, optional
+            location parameter (default=0)
+        scale : array-like, optional
+            scale parameter (default=1)
 
-        **kwds
-        ======
-        loc   - location parameter (default=0)
-        scale - scale parameter (default=1)
+        Returns
+        -------
+        pdf : array-like
+            Probability density function evaluated at x
+
         """
         loc,scale=map(kwds.get,['loc','scale'])
-        args, loc, scale = self.fix_loc_scale(args, loc, scale)
+        args, loc, scale = self._fix_loc_scale(args, loc, scale)
         x,loc,scale = map(arr,(x,loc,scale))
         args = tuple(map(arr,args))
         x = arr((x-loc)*1.0/scale)
@@ -1599,20 +587,29 @@ class rv_continuous(rv_generic):
         return output
 
     def cdf(self,x,*args,**kwds):
-        """Cumulative distribution function at x of the given RV.
+        """
+        Cumulative distribution function at x of the given RV.
 
-        *args
-        =====
-        The shape parameter(s) for the distribution (see docstring of the
-           instance object for more information)
+        Parameters
+        ----------
+        x : array-like
+            quantiles
+        arg1, arg2, arg3,... : array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+        loc : array-like, optional
+            location parameter (default=0)
+        scale : array-like, optional
+            scale parameter (default=1)
 
-        **kwds
-        ======
-        loc   - location parameter (default=0)
-        scale - scale parameter (default=1)
+        Returns
+        -------
+        cdf : array-like
+            Cumulative distribution function evaluated at x
+
         """
         loc,scale=map(kwds.get,['loc','scale'])
-        args, loc, scale = self.fix_loc_scale(args, loc, scale)
+        args, loc, scale = self._fix_loc_scale(args, loc, scale)
         x,loc,scale = map(arr,(x,loc,scale))
         args = tuple(map(arr,args))
         x = (x-loc)*1.0/scale
@@ -1631,20 +628,29 @@ class rv_continuous(rv_generic):
         return output
 
     def sf(self,x,*args,**kwds):
-        """Survival function (1-cdf) at x of the given RV.
-
-        *args
-        =====
-        The shape parameter(s) for the distribution (see docstring of the
-           instance object for more information)
-
-        **kwds
-        ======
-        loc   - location parameter (default=0)
-        scale - scale parameter (default=1)
         """
-        loc,scale = map(kwds.get,['loc','scale'])
-        args, loc, scale = self.fix_loc_scale(args, loc, scale)
+        Survival function (1-cdf) at x of the given RV.
+
+        Parameters
+        ----------
+        x : array-like
+            quantiles
+        arg1, arg2, arg3,... : array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+        loc : array-like, optional
+            location parameter (default=0)
+        scale : array-like, optional
+            scale parameter (default=1)
+
+        Returns
+        -------
+        sf : array-like
+            Survival function evaluated at x
+
+        """
+        loc,scale=map(kwds.get,['loc','scale'])
+        args, loc, scale = self._fix_loc_scale(args, loc, scale)
         x,loc,scale = map(arr,(x,loc,scale))
         args = tuple(map(arr,args))
         x = (x-loc)*1.0/scale
@@ -1661,52 +667,30 @@ class rv_continuous(rv_generic):
             return output[()]
         return output
 
-    def chf(self,x,*args,**kwds):
-        """Cumulative hazard function -log(1-cdf) at x of the given RV.
-
-        *args
-        =====
-        The shape parameter(s) for the distribution (see docstring of the
-           instance object for more information)
-
-        **kwds
-        ======
-        loc   - location parameter (default=0)
-        scale - scale parameter (default=1)
-        """
-        loc,scale = map(kwds.get,['loc','scale'])
-        args, loc, scale = self.fix_loc_scale(args, loc, scale)
-        x,loc,scale = map(arr,(x,loc,scale))
-        args = tuple(map(arr,args))
-        x = (x-loc)*1.0/scale
-        ok_shape_scale = self._argcheck(*args) & (scale > 0)
-        cond1 = (scale > 0) & (x > self.a) & (x < self.b)
-        cond2 = ok_shape_scale & (x <= self.a)
-        cond = ok_shape_scale & cond1
-        output = zeros(shape(cond),'d')
-        place(output,(1-ok_shape_scale)*(cond1==cond1),self.badvalue)
-        place(output,cond1,-inf)
-        if any(cond):
-            goodargs = argsreduce(cond, *((x,)+args))
-            place(output,cond,self._chf(*goodargs))
-        if output.ndim == 0:
-            return output[()]
-        return output
     def ppf(self,q,*args,**kwds):
-        """Percent point function (inverse of cdf) at q of the given RV.
+        """
+        Percent point function (inverse of cdf) at q of the given RV.
 
-        *args
-        =====
-        The shape parameter(s) for the distribution (see docstring of the
-           instance object for more information)
+        Parameters
+        ----------
+        q : array-like
+            lower tail probability
+        arg1, arg2, arg3,... : array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+        loc : array-like, optional
+            location parameter (default=0)
+        scale : array-like, optional
+            scale parameter (default=1)
 
-        **kwds
-        ======
-        loc   - location parameter (default=0)
-        scale - scale parameter (default=1)
+        Returns
+        -------
+        x : array-like
+            quantile corresponding to the lower tail probability q.
+
         """
         loc,scale=map(kwds.get,['loc','scale'])
-        args, loc, scale = self.fix_loc_scale(args, loc, scale)
+        args, loc, scale = self._fix_loc_scale(args, loc, scale)
         q,loc,scale = map(arr,(q,loc,scale))
         args = tuple(map(arr,args))
         cond0 = self._argcheck(*args) & (scale > 0) & (loc==loc)
@@ -1725,20 +709,29 @@ class rv_continuous(rv_generic):
         return output
 
     def isf(self,q,*args,**kwds):
-        """Inverse survival function at q of the given RV.
+        """
+        Inverse survival function at q of the given RV.
 
-        *args
-        =====
-        The shape parameter(s) for the distribution (see docstring of the
-           instance object for more information)
+        Parameters
+        ----------
+        q : array-like
+            upper tail probability
+        arg1, arg2, arg3,... : array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+        loc : array-like, optional
+            location parameter (default=0)
+        scale : array-like, optional
+            scale parameter (default=1)
 
-        **kwds
-        ======
-        loc   - location parameter (default=0)
-        scale - scale parameter (default=1)
+        Returns
+        -------
+        x : array-like
+            quantile corresponding to the upper tail probability q.
+
         """
         loc,scale=map(kwds.get,['loc','scale'])
-        args, loc, scale = self.fix_loc_scale(args, loc, scale)
+        args, loc, scale = self._fix_loc_scale(args, loc, scale)
         q,loc,scale = map(arr,(q,loc,scale))
         args = tuple(map(arr,args))
         cond0 = self._argcheck(*args) & (scale > 0) & (loc==loc)
@@ -1758,23 +751,32 @@ class rv_continuous(rv_generic):
         return output
 
     def stats(self,*args,**kwds):
-        """Some statistics of the given RV
+        """
+        Some statistics of the given RV
 
-        *args
-        =====
-        The shape parameter(s) for the distribution (see docstring of the
-           instance object for more information)
+        Parameters
+        ----------
+        arg1, arg2, arg3,... : array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+        loc : array-like, optional
+            location parameter (default=0)
+        scale : array-like, optional
+            scale parameter (default=1)
 
-        **kwds
-        ======
-        loc     - location parameter (default=0)
-        scale   - scale parameter (default=1)
-        moments - a string composed of letters ['mvsk'] specifying
-                   which moments to compute (default='mv')
-                   'm' = mean,
-                   'v' = variance,
-                   's' = (Fisher's) skew,
-                   'k' = (Fisher's) kurtosis.
+        moments : string, optional
+            composed of letters ['mvsk'] defining which moments to compute:
+            'm' = mean,
+            'v' = variance,
+            's' = (Fisher's) skew,
+            'k' = (Fisher's) kurtosis.
+            (default='mv')
+
+        Returns
+        -------
+        stats : sequence
+            of requested moments.
+
         """
         loc,scale,moments=map(kwds.get,['loc','scale','moments'])
 
@@ -1800,13 +802,14 @@ class rv_continuous(rv_generic):
 
         signature = inspect.getargspec(self._stats.im_func)
         if (signature[2] is not None) or ('moments' in signature[0]):
-            mu, mu2, g1, g2 = self._stats(*args,**{'moments':moments})
+            #this did not fetch mv, adjust to also get mv
+            mu, mu2, g1, g2 = self._stats(*args,**{'moments':moments+'mv'})
         else:
             mu, mu2, g1, g2 = self._stats(*args)
         if g1 is None:
             mu3 = None
         else:
-            mu3 = g1*np.power(mu2,1.5) #(mu2**1.5) breaks down for nan and nin
+            mu3 = g1*np.power(mu2,1.5) #(mu2**1.5) breaks down for nan and inf
         default = valarray(shape(cond), self.badvalue)
         output = []
 
@@ -1870,6 +873,19 @@ class rv_continuous(rv_generic):
             return tuple(output)
 
     def moment(self, n, *args):
+        """
+        n'th order non-central moment of distribution
+
+        Parameters
+        ----------
+        n: int, n>=1
+            order of moment
+
+        arg1, arg2, arg3,... : array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+
+        """
         if (floor(n) != n):
             raise ValueError, "Moment must be an integer."
         if (n < 0): raise ValueError, "Moment must be positive."
@@ -1885,72 +901,32 @@ class rv_continuous(rv_generic):
                 if mu is None: return self._munp(1,*args)
                 else: return mu
             elif (n==2):
-                if mu2 is None or mu is None: return self._munp(2,*args)
+                if mu2 is None or mu is None:
+                    return self._munp(2,*args)
                 else: return mu2 + mu*mu
             elif (n==3):
-                if g1 is None or mu2 is None: return self._munp(3,*args)
-                else: return g1*(mu2**1.5)
+                if g1 is None or mu2 is None:
+                    return self._munp(3,*args)
+                else:
+                    mu3 = g1*(mu2**1.5) # 3rd central moment
+                    return mu3+3*mu*mu2+mu**3 # 3rd non-central moment
             else: # (n==4)
-                if g2 is None or mu2 is None: return self._munp(4,*args)
-                else: return (g2+3.0)*(mu2**2.0)
+                if g2 is None or mu2 is None:
+                    return self._munp(4,*args)
+                else:
+                    mu4 = (g2+3.0)*(mu2**2.0) # 4th central moment
+                    mu3 = g1*(mu2**1.5) # 3rd central moment
+                    return mu4+4*mu*mu3+6*mu*mu*mu2+mu**4
         else:
             return self._munp(n,*args)
-    def pvalue(self,theta,x,unknown_numpar=None):
-        ''' Return the P-value for the fit using Moran's negative log Product Spacings statistic
 
-            where theta are the parameters (including loc and scale)
+    def _nnlf(self, x, *args):
+        return -sum(log(self._pdf(x, *args)),axis=0)
 
-            Note: the data in x must be sorted
-        '''
-        dx = numpy.diff(x,axis=0)
-        tie = (dx==0)
-        if any(tie):
-            disp('P-value is on the conservative side (i.e. too large) due to ties in the data!')
-
-        T = self.nlogps(theta,x)
-
-        n = len(x)
-        np1 = n+1
-        if unknown_numpar==None:
-            k = len(theta)
-        else:
-            k = unknown_numpar
-
-        isParUnKnown = True
-        m = (np1)*(log(np1)+0.57722)-0.5-1.0/(12.*(np1))
-        v = (np1)*(pi**2./6.0-1.0)-0.5-1.0/(6.*(np1))
-        C1 = m-sqrt(0.5*n*v)
-        C2 = sqrt(v/(2.0*n))
-        Tn = (T + 0.5*k*isParUnKnown-C1)/C2 # chi2 with n degrees of freedom
-        pvalue = chi2.sf(Tn,n)
-        return pvalue
-
-    def nlogps(self,theta,x):
-        """ Moran's negative log Product Spacings statistic
-
-            where theta are the parameters (including loc and scale)
-
-            Note the data in x must be sorted
-
-        References
-        -----------
-
-        R. C. H. Cheng; N. A. K. Amin (1983)
-        "Estimating Parameters in Continuous Univariate Distributions with a
-        Shifted Origin.",
-        Journal of the Royal Statistical Society. Series B (Methodological),
-        Vol. 45, No. 3. (1983), pp. 394-403.
-
-        R. C. H. Cheng; M. A. Stephens (1989)
-        "A Goodness-Of-Fit Test Using Moran's Statistic with Estimated
-        Parameters", Biometrika, 76, 2, pp 385-392
-
-        Wong, T.S.T. and Li, W.K. (2006)
-        "A note on the estimation of extreme value distributions using maximum
-        product of spacings.",
-        IMS Lecture Notes Monograph Series 2006, Vol. 52, pp. 272-283
-        """
-
+    def nnlf(self, theta, x):
+        # - sum (log pdf(x, theta),axis=0)
+        #   where theta are the parameters (including loc and scale)
+        #
         try:
             loc = theta[-2]
             scale = theta[-1]
@@ -1964,188 +940,20 @@ class rv_continuous(rv_generic):
         if (any(cond0)):
             return inf
         else:
-            linfo = numpy.finfo(float)
-            realmax = floatinfo.machar.xmax
-
-            lowertail = True
-            if lowertail:
-                prb = numpy.hstack((0.0, self.cdf(x,*args), 1.0))
-                dprb = numpy.diff(prb)
-            else:
-                prb = numpy.hstack((1.0, self.sf(x,*args), 0.0))
-                dprb = -numpy.diff(prb)
-
-            logD = log(dprb)
-            dx = numpy.diff(x,axis=0)
-            tie = (dx==0)
-            if any(tie):
-                # TODO % implement this method for treating ties in data:
-                # Assume measuring error is delta. Then compute
-                # yL = F(xi-delta,theta)
-                # yU = F(xi+delta,theta)
-                # and replace
-                # logDj = log((yU-yL)/(r-1)) for j = i+1,i+2,...i+r-1
-
-                # The following is OK when only minimization of T is wanted
-
-                i_tie = nonzero(tie)
-                tiedata = x[i_tie]
-
-                logD[(I_tie[0]+1,)]= log(self._pdf(tiedata,*args)) + log(scale)
-
-            finiteD = numpy.isfinite(logD)
-            nonfiniteD = 1-finiteD
-            if any(nonfiniteD):
-                T = -sum(logD[finiteD],axis=0) + 100.0*log(realmax)*sum(nonfiniteD,axis=0);
-            else:
-                T = -sum(logD,axis=0) #%Moran's negative log product spacing statistic
-        return T
-    def link(self,x,logSF,theta,i):
-        ''' Return dist. par. no. i as function of quantile (x) and log survival probability (sf)
-
-            Assumptions:
-            ------------
-             phat is list containing all parameters including location and scale.
-        '''
-        raise ValueError('Link function not implemented for the %s distribution' % self.name)
-        return None
-    def _nnlf(self, x, *args):
-        return -sum(log(self._pdf(x, *args)),axis=0)
-
-    def nnlf(self, theta, x):
-        ''' Return negative loglikelihood function, i.e., - sum (log pdf(x, theta),axis=0)
-           where theta are the parameters (including loc and scale)
-        '''
-        try:
-            loc = theta[-2]
-            scale = theta[-1]
-            args = tuple(theta[:-2])
-        except IndexError:
-            raise ValueError, "Not enough input arguments."
-        if not self._argcheck(*args) or scale <= 0:
-            return inf
-        x = arr((x-loc) / scale)
-        cond0 = (x<=self.a) | (self.b<=x)
-        newCall = False
-        if newCall:
-            goodargs = argsreduce(1-cond0, *((x,)))
-            goodargs = tuple(goodargs + list(args))
-            N = len(x)
-            Nbad = sum(cond0)
-            xmin = floatinfo.machar.xmin
-            return self._nnlf(*goodargs) + N*log(scale) + Nbad*100.0*log(xmin)
-        elif (any(cond0)):
-            return inf
-        else:
             N = len(x)
             return self._nnlf(x, *args) + N*log(scale)
-    def hessian_nnlf(self,theta,data,eps=None):
-        ''' approximate hessian of nnlf where theta are the parameters (including loc and scale)
-        '''
-        #Nd = len(x)
-        np = len(theta)
-        # pab 07.01.2001: Always choose the stepsize h so that
-        # it is an exactly representable number.
-        # This is important when calculating numerical derivatives and is
-        #  accomplished by the following.
-
-        if eps==None:
-            eps = (floatinfo.machar.eps)**0.4
-        xmin = floatinfo.machar.xmin
-        #myfun = lambda y: max(y,100.0*log(xmin)) #% trick to avoid log of zero
-        delta  = (eps+2.0)-2.0
-        delta2 = delta**2.0
-        #    % Approximate 1/(nE( (d L(x|theta)/dtheta)^2)) with
-        #    %             1/(d^2 L(theta|x)/dtheta^2)
-        #    %  using central differences
-
-        LL = self.nnlf(theta,data)
-        H = zeros((np,np))   #%% Hessian matrix
-        theta = tuple(theta)
-        for ix in xrange(np):
-            sparam = list(theta)
-            sparam[ix]= theta[ix]+delta
-            fp  = self.nnlf(sparam,data)
-            #fp = sum(myfun(x))
-
-            sparam[ix] = theta[ix]-delta
-            fm  = self.nnlf(sparam,data)
-            #fm = sum(myfun(x))
-
-            H[ix,ix] = (fp-2*LL+fm)/delta2
-            for iy in range(ix+1,np):
-                sparam[ix] = theta[ix]+delta
-                sparam[iy] = theta[iy]+delta
-                fpp  = self.nnlf(sparam,data)
-                #fpp = sum(myfun(x))
-
-                sparam[iy] = theta[iy]-delta
-                fpm  = self.nnlf(sparam,data)
-                #fpm = sum(myfun(x))
-
-                sparam[ix] = theta[ix]-delta
-                fmm  = self.nnlf(sparam,data)
-                #fmm = sum(myfun(x));
-
-                sparam[iy] = theta[iy]+delta
-                fmp  = self.nnlf(sparam,data)
-                #fmp = sum(myfun(x))
-                H[ix,iy] = ((fpp+fmm)-(fmp+fpm))/(4.*delta2)
-                H[iy,ix] = H[ix,iy]
-                sparam[iy] = theta[iy];
-
-        # invert the Hessian matrix (i.e. invert the observed information number)
-        #pcov = -pinv(H);
-        return -H
 
     def fit(self, data, *args, **kwds):
-        ''' Return Maximum Likelihood or Maximum Product Spacing estimator object
-
-          CALL  generic.fit(data,*args,**kwds)
-
-        data   = data used in fitting
-
-        *args
-        =====
-        list of initial non-fixed distribution parameter-values
-        including loc and scale (see docstring of the
-           instance object for more information)
-
-        **kwds
-        ======
-        method  - String describing the method of estimation. Options are
-                    'ml' : Maximum Likelihood method (default)
-                    'mps': Maximum Product Spacing method
-        alpha   - Confidence coefficent             (default 0.05)
-        par_fix - List of fixed parameters. Non fixed parameters must be given as NaN's.
-                  (Must have the same length as the number of parameters or be None)
-                  (default None)
-        search  - If true search for best estimator (default),
-                    otherwise return object with initial distribution parameters
-        copydata - If true copydata (default)
-
-        Note: data is sorted using this function, so if copydata==False the data
-            in your namespace will be sorted as well.
-        '''
-        return  FitDistribution(self, data, *args, **kwds)
-
-#        loc0, scale0, method = map(kwds.get, ['loc', 'scale','method'],[none, none,'ml'])
-#        args, loc0, scale0 = self.fix_loc_scale(args, loc0, scale0)
-#        Narg = len(args)
-#        if Narg != self.numargs:
-#            if Narg > self.numargs:
-#                raise ValueError, "Too many input arguments."
-#            else:
-#                args += (1.0,)*(self.numargs-Narg)
-#        # location and scale are at the end
-#        x0 = args + (loc0, scale0)
-#        if method.lower()[:].startswith('mps'):
-#            data.sort()
-#            fitfun = self.nlogps
-#        else:
-#            fitfun = self.nnlf
-#
-#        return optimize.fmin(fitfun,x0,args=(ravel(data),),disp=0)
+        loc0, scale0 = map(kwds.get, ['loc', 'scale'],[0.0, 1.0])
+        Narg = len(args)
+        if Narg != self.numargs:
+            if Narg > self.numargs:
+                raise ValueError, "Too many input arguments."
+            else:
+                args += (1.0,)*(self.numargs-Narg)
+        # location and scale are at the end
+        x0 = args + (loc0, scale0)
+        return optimize.fmin(self.nnlf,x0,args=(ravel(data),),disp=0)
 
     def est_loc_scale(self, data, *args):
         mu, mu2 = self.stats(*args,**{'moments':'mv'})
@@ -2165,9 +973,11 @@ class rv_continuous(rv_generic):
         def integ(x):
             val = self._pdf(x, *args)
             return val*log(val)
-        entr = -quad(integ,self.a,self.b)[0]
-	if np.isnan(entr):
-            # try with different limits if integration problems
+
+        entr = -scipy.integrate.quad(integ,self.a,self.b)[0]
+        if not np.isnan(entr):
+            return entr
+        else:  # try with different limits if integration problems
             low,upp = self.ppf([0.001,0.999],*args)
             if np.isinf(self.b):
                 upper = upp
@@ -2177,13 +987,27 @@ class rv_continuous(rv_generic):
                 lower = low
             else:
                 lower = self.a
-            entr = -quad(integ,lower,upper)[0]
-	return entr
+            return -scipy.integrate.quad(integ,lower,upper)[0]
 
 
     def entropy(self, *args, **kwds):
+        """
+        Differential entropy of the RV.
+
+
+        Parameters
+        ----------
+        arg1, arg2, arg3,... : array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+        loc : array-like, optional
+            location parameter (default=0)
+        scale : array-like, optional
+            scale parameter (default=1)
+
+        """
         loc,scale=map(kwds.get,['loc','scale'])
-        args, loc, scale = self.fix_loc_scale(args, loc, scale)
+        args, loc, scale = self._fix_loc_scale(args, loc, scale)
         args = tuple(map(arr,args))
         cond0 = self._argcheck(*args) & (scale > 0) & (loc==loc)
         output = zeros(shape(cond0),'d')
@@ -2217,8 +1041,6 @@ General Kolmogorov-Smirnov one-sided test.
 class kstwobign_gen(rv_continuous):
     def _cdf(self,x):
         return 1.0-special.kolmogorov(x)
-    def _sf(self,x):
-        return special.kolmogorov(x)
     def _ppf(self,q):
         return special.kolmogi(1.0-q)
 kstwobign = kstwobign_gen(a=0.0,name='kstwobign', longname='Kolmogorov-Smirnov two-sided (for large N)', extradoc="""
@@ -2234,7 +1056,7 @@ Kolmogorov-Smirnov two-sided test for large N
 # Keep these implementations out of the class definition so they can be reused
 # by other distributions.
 def _norm_pdf(x):
-    return exp(-x**2/2.0)/sqrt(2*pi)
+    return 1.0/sqrt(2*pi)*exp(-x**2/2.0)
 def _norm_cdf(x):
     return special.ndtr(x)
 def _norm_ppf(q):
@@ -2248,8 +1070,6 @@ class norm_gen(rv_continuous):
         return _norm_cdf(x)
     def _ppf(self,q):
         return _norm_ppf(q)
-    def _isf(self,q):
-        return -_norm_ppf(q)
     def _stats(self):
         return 0.0, 1.0, 0.0, 0.0
     def _entropy(self):
@@ -2392,7 +1212,7 @@ betaprime = betaprime_gen(a=0.0, b=500.0, name='betaprime', shapes='a,b',
 Beta prime distribution
 
 betaprime.pdf(x, a, b) = gamma(a+b)/(gamma(a)*gamma(b))
-                          * x**(a-1) * (1-x)**(-a-b)
+                     * x**(a-1) * (1-x)**(-a-b)
 for x > 0, a, b > 0.
 """)
 
@@ -2417,7 +1237,7 @@ class bradford_gen(rv_continuous):
             g1 /= sqrt(c*(c*(k-2)+2*k))*(3*c*(k-2)+6*k)
         if 'k' in moments:
             g2 = c**3*(k-3)*(k*(3*k-16)+24)+12*k*c*c*(k-4)*(k-3) \
-               + 6*c*k*k*(3*k-14) + 12*k**3
+                 + 6*c*k*k*(3*k-14) + 12*k**3
             g2 /= 3*c*(c*(k-2)+2*k)**2
         return mu, mu2, g1, g2
     def _entropy(self, c):
@@ -2701,40 +1521,14 @@ Erlang distribution (Gamma with integer shape parameter)
 ## scale == 1.0 / lambda
 
 class expon_gen(rv_continuous):
-    def link(self,x,logSF,phat,ix):
-        ''' Link for x,SF and parameters of Exponential distribution
-
-        CALL  phati = expon.link(x,logSF,phat,i)
-
-         phati = parameter i as function of x, logSF and phat(j) where j ~= i
-         x     = quantile
-         logSF  = logarithm of the survival probability
-
-        LINK is a function connecting the quantile (x) and the survival
-        probability (R) with the fixed distribution parameter, i.e.:
-        phat(i) = link(x,logSF,phat,i),
-        where logSF = log(Prob(X>x;phat)).
-
-        Example % See proflog
-
-        See also profile
-        '''
-        if ix==1:
-            return -(x-phat[0])/logSF
-        elif ix==0:
-            return x+phat[1]*logSF
-
-
     def _rvs(self):
         return mtrand.standard_exponential(self._size)
     def _pdf(self, x):
         return exp(-x)
-    def _chf(self,x):
-        return x
     def _cdf(self, x):
-        return -expm1(-x)
+        return 1.0-exp(-x)
     def _ppf(self, q):
-        return -log1p(-q)
+        return -log(1.0-q)
     def _stats(self):
         return 1.0, 1.0, 2.0, 6.0
     def _entropy(self):
@@ -2754,15 +1548,14 @@ scale = 1.0 / lambda
 
 ## Exponentiated Weibull
 class exponweib_gen(rv_continuous):
-
     def _pdf(self, x, a, c):
         exc = exp(-x**c)
         return a*c*(1-exc)**arr(a-1) * exc * x**arr(c-1)
     def _cdf(self, x, a, c):
-        exm1c = -expm1(-x**c)
-        return arr((exm1c)**a)
+        exc = exp(-x**c)
+        return arr((1-exc)**a)
     def _ppf(self, q, a, c):
-        return (-log1p(-q**(1.0/a)))**arr(1.0/c)
+        return (-log(1-q**(1.0/a)))**arr(1.0/c)
 exponweib = exponweib_gen(a=0.0,name='exponweib',
                           longname="An exponentiated Weibull",
                           shapes="a,c",extradoc="""
@@ -2783,9 +1576,9 @@ class exponpow_gen(rv_continuous):
         return exp(1)*b*xbm1 * exp(xb - exp(xb))
     def _cdf(self, x, b):
         xb = arr(x**b)
-        return -expm1(-expm1(xb))
+        return 1.0-exp(1-exp(xb))
     def _ppf(self, q, b):
-        return pow(log1p(-log1p(-q)), 1.0/b)
+        return pow(log(1.0-log(1.0-q)), 1.0/b)
 exponpow = exponpow_gen(a=0.0,name='exponpow',longname="An exponential power",
                         shapes='b',extradoc="""
 
@@ -2937,25 +1730,12 @@ for c >= 0.
 ##   a limiting value distribution.
 ##
 class frechet_r_gen(rv_continuous):
-    def link(self,x,logSF,phat,ix):
-        u = phat[1]
-        if ix==0:
-            phati = (x-phat[1])/(-logSF)**(1./phat[2])
-        elif ix==2:
-            phati = log(-logSF)/log((x-phat[1])/phat[0])
-        elif ix==1:
-            phati = x-phat[0]*(-logSF)**(1./phat[2]);
-        else:
-            raise IndexError('Index to the fixed parameter is out of bounds')
-        return phati
-
-
     def _pdf(self, x, c):
         return c*pow(x,c-1)*exp(-pow(x,c))
     def _cdf(self, x, c):
-        return -expm1(-pow(x,c))
+        return 1-exp(-pow(x,c))
     def _ppf(self, q, c):
-        return pow(-log1p(-q),1.0/c)
+        return pow(-log(1-q),1.0/c)
     def _munp(self, n, c):
         return special.gamma(1.0+n*1.0/c)
     def _entropy(self, c):
@@ -3047,166 +1827,36 @@ for x > 0, c > 0.
 """
                               )
 
-def log1pxdx(x):
-    '''Computes Log(1+x)/x
-    '''
-    y = where(x==0,1.0,log1p(x)/x)
-    return where(x==inf,0.0,y)
-##    y = ones(shape(x))
-##    k = (x!=0.0)
-##    y[k] = log1p(x[k])/x[k]
-##    y[x==inf] = 0.0
-##    return y
-
 ## Generalized Pareto
 class genpareto_gen(rv_continuous):
-    def link(self,x,logSF,phat,ix):
-        # Reference
-        # Stuart Coles (2004)
-        # "An introduction to statistical modelling of extreme values".
-        # Springer series in statistics
-
-        u = phat[1]
-        if ix==0:
-            raise ValueError('link(x,logSF,phat,i) where i=0 is not implemented!')
-        elif ix==2:
-            # % Reorganizing w.r.t. phat(2) (scale), Eq. 4.13 and 4.14, pp 81 in Coles (2004) gives
-            #   link = @(x,logSF,phat,ix) -(x-phat(3)).*phat(1)./expm1(phat(1).*logSF);
-            if phat[0]!=0.0:
-                phati =  (x-u)*phat[0]/expm1(-phat[0]*logSF)
-            else:
-                phati =  -(x-u)/logSF
-        elif ix==1:
-            if phat[0]!=0:
-                phati =  x + phat[2]*expm1(phat[0]*logSF)/phat[0]
-            else:
-                phati = x+phat(2)*logSF
-        else:
-            raise IndexError('Index to the fixed parameter is out of bounds')
-        return phati
-
     def _argcheck(self, c):
         c = arr(c)
-        self.b = where(0<=c,inf, 1.0/abs(c))
-        return where(abs(c)==inf, 0, 1)
+        self.b = where(c < 0, 1.0/abs(c), inf)
+        return where(c==0, 0, 1)
     def _pdf(self, x, c):
-        cx = where((c==0) & (x==inf),0.0,c*x).clip(min=-1.0)
-        #putmask(cx,cx<-1,-1.0)
-        logpdf = where((cx==inf) | (cx==-1),-inf,-(x+cx)*log1pxdx(cx))
-        putmask(logpdf,(c==-1) & (x==1.0),0.0)
-        return exp(logpdf)
-
-        #%f = exp(-xn)./s;                   % for  k==0
-        #%f = (1+k.*xn).^(-1./k-1)/s;        % for  k~=0
-        #%f = exp((-1./k-1).*log1p(kxn))/s  % for  k~=0
-        #%f = exp((-xn-kxn).*log1p(kxn)./(kxn))/s  % for any k kxn~=inf
-        #Px = pow(1+c*x,arr(-1.0-1.0/c))
-        #return Px
-    def _chf(self,x,c):
-        cx = c*x
-        return where((0.0<x) & (-1.0<=cx) & (c!=0),log1p(cx)/c,x)
+        Px = pow(1+c*x,arr(-1.0-1.0/c))
+        return Px
     def _cdf(self, x, c):
-        log_sf = -self._chf(x,c)
-        return -expm1(log_sf)
-        #return 1.0 - pow(1+c*x,arr(-1.0/c))
-    def _sf(self,x,c):
-        log_sf = -self._chf(x,c)
-        return exp(log_sf)
-    def _isf2(self,log_sf,c):
-        return where((c!=0) & (-inf<log_sf),expm1(-c*log_sf)/c,-log_sf)
+        return 1.0 - pow(1+c*x,arr(-1.0/c))
     def _ppf(self, q, c):
-        log_sf = log1p(-q)
-        return self._isf2(log_sf,c)
-    def _isf(self,q,c):
-        log_sf = log(q)
-        return self._isf2(log_sf,c)
-
-        #vals = 1.0/c * (pow(1-q, -c)-1)
-        #return vals
-    def hessian_nnlf(self,theta,x,eps=None):
-        try:
-            loc = theta[-2]
-            scale = theta[-1]
-            args = tuple(theta[:-2])
-        except IndexError:
-            raise ValueError, "Not enough input arguments."
-        if not self._argcheck(*args) or scale <= 0:
-            return inf
-        x = arr((x-loc) / scale)
-        cond0 = (x <= self.a) | (x >= self.b)
-        if any(cond0):
-            np = self.numargs+2
-            return valarray((np,np),value=nan)
-        eps = floatinfo.machar.eps
-        c = args[0]
-        n = len(x)
-        if abs(c) > eps:
-            cx = c*x;
-            sumlog1pcx = sum(log1p(cx));
-            #LL = n*log(scale) + (1-1/k)*sumlog1mkxn
-            r = x/(1.0+cx)
-            sumix = sum(1.0/(1.0+cx)**2.0)
-
-            sumr = sum(r)
-            sumr2 = sum(r**2.0)
-            H11 = -2*sumlog1pcx/c**3 + 2*sumr/c**2 + (1.0+1.0/c)*sumr2
-            H22 = c*(c+1)*sumix/scale**2.0
-            H33 = (n - 2*(c+1)*sumr + c*(c+1)*sumr2)/scale**2.0;
-            H12 = -sum((1-x)/((1+cx)**2.0))/scale
-            H23 = -(c+1)*sumix/scale**2.0
-            H13 = -(sumr - (c+1)*sumr2)/scale;
-
-
-        else: # c == 0
-            sumx = sum(x);
-            #LL = n*log(scale) + sumx;
-
-            sumx2 = sum(x**2.0);
-            H11 = -(2/3)*sum(x**3.0) + sumx2
-            H22 = 0.0
-            H12 = -(n-sum(x))/scale
-            H23 = -n*1.0/scale**2.0
-            H33 = (n - 2*sumx)/scale**2.0
-            H13 = -(sumx - sumx2)/scale
-
-        #% Hessian matrix
-        H = [[H11,H12, H13],[H12,H22,H23],[H13, H23, H33]]
-        return asarray(H)
-    def _stats(self,c):
-        #return None,None,None,None
-        k = -c
-        m = where(k<-1.0,inf,1.0/(1+k))
-        v = where(k<-0.5,nan,1.0/((1+k)**2.0*(1+2*k)))
-        sk = where(k<-1.0/3,nan,2.*(1-k)*sqrt(1+2.0*k)/(1.0 +3.*k))
-        #% E(X^r) = s^r*(-k)^-(r+1)*gamma(1+r)*gamma(-1/k-r)/gamma(1-1/k)
-        #%  = s^r*gamma(1+r)./( (1+k)*(1+2*k).*....*(1+r*k))
-        #% E[(1-k(X-m0)/s)^r] = 1/(1+k*r)
-
-        #%Ex3 = (sk.*sqrt(v)+3*m).*v+m^3
-        #%Ex3 = 6.*s.^3/((1+k).*(1+2*k).*(1+3*k))
-        r = 4.0;
-        Ex4 = gam(1.+r)/((1.+k)*(1.+2.*k)*(1.+3.*k)*(1+4.*k))
-        m1 = m
-        ku = where(k<-1./4,nan,(Ex4-4.*sk*v**(3./2)*m1-6*m1**2.*v-m1**4.)/v**2.-3.0)
-        return m,v,sk,ku
+        vals = 1.0/c * (pow(1-q, -c)-1)
+        return vals
     def _munp(self, n, c):
         k = arange(0,n+1)
         val = (-1.0/c)**n * sum(comb(n,k)*(-1)**k / (1.0-c*k),axis=0)
         return where(c*n < 1, val, inf)
     def _entropy(self, c):
-        return 1+c
-##        if (c >= 0):
-##            return 1+c
-##        else:
-##            self.b = -1.0 / c
-##            return rv_continuous._entropy(self, c)
+        if (c > 0):
+            return 1+c
+        else:
+            self.b = -1.0 / c
+            return rv_continuous._entropy(self, c)
 genpareto = genpareto_gen(a=0.0,name='genpareto',
                           longname="A generalized Pareto",
                           shapes='c',extradoc="""
 
 Generalized Pareto distribution
 
-genpareto.pdf(x,c) = exp(-x) for c==0
 genpareto.pdf(x,c) = (1+c*x)**(-1-1/c)
 for c != 0, and for x >= 0 for all c, and x < 1/abs(c) for c < 0.
 """
@@ -3215,28 +1865,17 @@ for c != 0, and for x >= 0 for all c, and x < 1/abs(c) for c < 0.
 ## Generalized Exponential
 
 class genexpon_gen(rv_continuous):
-    def link(self,x,logSF,phat,ix):
-        xn = (x-phat[3])/phat[4]
-        fact1 = (xn+expm1(-c*xn)/c)
-        if ix ==0:
-            phati = b*fact1+logSF
-        elif ix == 1:
-            phati = (phat[0]-logSF)/fact1
-        else:
-            raise IndexError('Only implemented for ix in [1,2]!')
-        return phati
-
     def _pdf(self, x, a, b, c):
-        return (a+b*(-expm1(-c*x)))*exp((-a-b)*x+b*(-expm1(-c*x))/c)
+        return (a+b*(1-exp(-c*x)))*exp((-a-b)*x+b*(1-exp(-c*x))/c)
     def _cdf(self, x, a, b, c):
-        return -expm1((-a-b)*x + b*(-expm1(-c*x))/c)
+        return 1.0-exp((-a-b)*x + b*(1-exp(-c*x))/c)
 genexpon = genexpon_gen(a=0.0,name='genexpon',
                         longname='A generalized exponential',
                         shapes='a,b,c',extradoc="""
 
 Generalized exponential distribution (Ryu 1993)
 
-genexpon.pdf(x,a,b,c) = (a+b*(1-exp(-c*x))) * exp(-a*x-b*x+b/c*(1-exp(-c*x)))
+f(x,a,b,c) = (a+b*(1-exp(-c*x))) * exp(-a*x-b*x+b/c*(1-exp(-c*x)))
 for x >= 0, a,b,c > 0.
 
 a, b, c are the first, second and third shape parameters.
@@ -3382,10 +2021,6 @@ class gengamma_gen(rv_continuous):
         ic = 1.0/c
         cond = c+0*val1
         return where(cond > 0,val1**ic,val2**ic)
-    def _stats(self,a,c):
-
-        return _EULER, pi*pi/6.0, \
-               12*sqrt(6)/pi**3 * _ZETA3, 12.0/5
     def _munp(self, n, a, c):
         return special.gamma(a+n*1.0/c) / special.gamma(a)
     def _entropy(self, a,c):
@@ -3493,8 +2128,8 @@ class gumbel_l_gen(rv_continuous):
     def _ppf(self, q):
         return log(-log(1-q))
     def _stats(self):
-        return _EULER, pi*pi/6.0, \
-               12*sqrt(6)/pi**3 * _ZETA3, 12.0/5
+        return -_EULER, pi*pi/6.0, \
+               -12*sqrt(6)/pi**3 * _ZETA3, 12.0/5
     def _entropy(self):
         return 1.0608407169541684911
 gumbel_l = gumbel_l_gen(name='gumbel_l',longname="A left-skewed Gumbel",
@@ -3830,7 +2465,7 @@ for x < 0.
 
 This is the same as the Levy-stable distribution with a=1/2 and b=-1.
 """
-                    )
+                )
 
 ## Levy-stable Distribution (only random variates)
 
@@ -4429,15 +3064,6 @@ for -1 <= x <= 1, c > 0.
 # scale is the mode.
 
 class rayleigh_gen(rv_continuous):
-    #rayleigh_gen.link.__doc__ = rv_continuous.link.__doc__
-
-    def link(self,x,logSF,phat,ix):
-        rv_continuous.link.__doc__
-        if ix==1:
-            return x-phat[0]/sqrt(-2.0*logSF)
-        else:
-            return x-phat[1]*sqrt(-2.0*logSF)
-
     def _rvs(self):
         return chi.rvs(2,size=self._size)
     def _pdf(self, r):
@@ -4448,7 +3074,7 @@ class rayleigh_gen(rv_continuous):
         return sqrt(-2*log(1-q))
     def _stats(self):
         val = 4-pi
-        return pi/2, val/2, 2*(pi-3)*sqrt(pi)/val**1.5, \
+        return np.sqrt(pi/2), val/2, 2*(pi-3)*sqrt(pi)/val**1.5, \
                6*pi/val-16/val**2
     def _entropy(self):
         return _EULER/2.0 + 1 - 0.5*log(2)
@@ -4609,7 +3235,16 @@ class truncexpon_gen(rv_continuous):
     def _ppf(self, q, b):
         return -log(1-q+q*exp(-b))
     def _munp(self, n, b):
-        return gam(n+1)-special.gammainc(1+n,b)
+        #wrong answer with formula, same as in continuous.pdf
+        #return gam(n+1)-special.gammainc(1+n,b)
+        if n == 1:
+            return (1-(b+1)*np.exp(-b))/(1-np.exp(-b))
+        elif n == 2:
+            return 2*(1-0.5*(b*b+2*b+2)*np.exp(-b))/(1-np.exp(-b))
+        else:
+            #return generic for higher moments
+            #return rv_continuous._mom1_sc(self,n, b)
+            return self._mom1_sc(n, b)
     def _entropy(self, b):
         eB = exp(b)
         return log(eB-1)+(1+eB*(b-1.0))/(1.0-eB)
@@ -4643,7 +3278,7 @@ class truncnorm_gen(rv_continuous):
         nA, nB = self.na, self.nb
         d = nB - nA
         pA, pB = norm._pdf(a), norm._pdf(b)
-        mu = (pB - pA) / d
+        mu = (pA - pB) / d   #correction sign
         mu2 = 1 + (a*pA - b*pB) / d - mu*mu
         return mu, mu2, None, None
 truncnorm = truncnorm_gen(name='truncnorm', longname="A truncated normal",
@@ -4685,16 +3320,15 @@ class tukeylambda_gen(rv_continuous):
         mu4 = 3*gam(lam)*gam(lam+0.5)*pow(2,-2*lam) / lam**3 / gam(2*lam+1.5)
         mu4 += 2.0/lam**4 / (1+4*lam)
         mu4 -= 2*sqrt(3)*gam(lam)*pow(2,-6*lam)*pow(3,3*lam) * \
-            gam(lam+1.0/3)*gam(lam+2.0/3) / (lam**3.0 * gam(2*lam+1.5) * \
-                                             gam(lam+0.5))
+               gam(lam+1.0/3)*gam(lam+2.0/3) / (lam**3.0 * gam(2*lam+1.5) * \
+                                                gam(lam+0.5))
         g2 = mu4 / mu2 / mu2 - 3.0
 
         return 0, mu2, 0, g2
     def _entropy(self, lam):
         def integ(p):
             return log(pow(p,lam-1)+pow(1-p,lam-1))
-        return quad(integ,0,1)[0]
-        #return scipy.integrate.quad(integ,0,1)[0]
+        return scipy.integrate.quad(integ,0,1)[0]
 tukeylambda = tukeylambda_gen(name='tukeylambda', longname="A Tukey-Lambda",
                               shapes="lam", extradoc="""
 
@@ -4739,6 +3373,7 @@ Uniform distribution
 #   and converts them to [-pi, pi] equivalents.
 
 eps = numpy.finfo(float).eps
+
 
 class vonmises_gen(rv_continuous):
     def _rvs(self, b):
@@ -4989,15 +3624,16 @@ def make_dict(keys, values):
 #  x_k, p(x_k) lists in initialization
 
 class rv_discrete(rv_generic):
-    """A generic discrete random variable.
+    """
+    A Generic discrete random variable.
 
-    Discrete random variables are defined from a standard form.
-    The standard form may require some other parameters to complete
-    its specification.  The distribution methods also take an optional location
-    parameter using loc= keyword.  The default is loc=0.  The calling form
-    of the methods follow:
+    Discrete random variables are defined from a standard form and may require
+    some shape parameters to complete its specification. Any optional keyword
+    parameters can be passed to the methods of the RV object as given below:
 
-    generic.rvs(<shape(s)>,loc=0)
+    Methods
+    -------
+    generic.rvs(<shape(s)>,loc=0,size=1)
         - random variates
 
     generic.pmf(x,<shape(s)>,loc=0)
@@ -5022,17 +3658,45 @@ class rv_discrete(rv_generic):
         - entropy of the RV
 
     Alternatively, the object may be called (as a function) to fix
-       the shape and location parameters returning a
-       "frozen" discrete RV object:
+    the shape and location parameters returning a
+    "frozen" discrete RV object:
 
     myrv = generic(<shape(s)>,loc=0)
-        - frozen RV object with the same methods but holding the
-            given shape and location fixed.
+        - frozen RV object with the same methods but holding the given shape and location fixed.
 
     You can construct an aribtrary discrete rv where P{X=xk} = pk
     by passing to the rv_discrete initialization method (through the values=
     keyword) a tuple of sequences (xk,pk) which describes only those values of
     X (xk) that occur with nonzero probability (pk).
+
+    Examples
+    --------
+
+    >>> import matplotlib.pyplot as plt
+    >>> numargs = generic.numargs
+    >>> [ <shape(s)> ] = ['Replace with resonable value',]*numargs
+
+    Display frozen pmf:
+
+    >>> rv = generic(<shape(s)>)
+    >>> x = np.arange(0,np.min(rv.dist.b,3)+1)
+    >>> h = plt.plot(x,rv.pmf(x))
+
+    Check accuracy of cdf and ppf:
+
+    >>> prb = generic.cdf(x,<shape(s)>)
+    >>> h = plt.semilogy(np.abs(x-generic.ppf(prb,<shape(s)>))+1e-20)
+
+    Random number generation:
+
+    >>> R = generic.rvs(<shape(s)>,size=100)
+
+    Custom made discrete distribution:
+
+    >>> vals = [arange(7),(0.1,0.2,0.3,0.1,0.1,0.1,0.1)]
+    >>> custm = rv_discrete(name='custm',values=vals)
+    >>> h = plt.plot(vals[0],custm.pmf(vals[0]))
+
     """
     def __init__(self, a=0, b=inf, name=None, badvalue=None,
                  moment_tol=1e-8,values=None,inc=1,longname=None,
@@ -5112,6 +3776,7 @@ class rv_discrete(rv_generic):
         if self.__doc__ is None:
             self.__doc__ = rv_discrete.__doc__
         if self.__doc__ is not None:
+            self.__doc__ = textwrap.dedent(self.__doc__)
             self.__doc__ = self.__doc__.replace("A Generic",longname)
             if name is not None:
                 self.__doc__ = self.__doc__.replace("generic",name)
@@ -5122,7 +3787,7 @@ class rv_discrete(rv_generic):
             ind = self.__doc__.find("You can construct an arbitrary")
             self.__doc__ = self.__doc__[:ind].strip()
             if extradoc is not None:
-                self.__doc__ = self.__doc__ + extradoc
+                self.__doc__ += textwrap.dedent(extradoc)
 
     def _rvs(self, *args):
         return self._ppf(mtrand.random_sample(self._size),*args)
@@ -5164,24 +3829,51 @@ class rv_discrete(rv_generic):
 
 
     def rvs(self, *args, **kwargs):
+        """
+        Random variates of given type.
+
+        Parameters
+        ----------
+        arg1, arg2, arg3,... : array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+        loc : array-like, optional
+            location parameter (default=0)
+        size : int or tuple of ints, optional
+            defining number of random variates (default=1)
+
+        Returns
+        -------
+        rvs : array-like
+            random variates of given `size`
+
+        """
         kwargs['discrete'] = True
-        return super(rv_discrete,self).rvs(*args, **kwargs)
-        #rv_generic.rvs(self, *args, **kwargs)
+        return rv_generic.rvs(self, *args, **kwargs)
 
     def pmf(self, k,*args, **kwds):
-        """Probability mass function at k of the given RV.
+        """
+        Probability mass function at k of the given RV.
 
-        *args
-        =====
-        The shape parameter(s) for the distribution (see docstring of the
-           instance object for more information)
 
-        **kwds
-        ======
-        loc   - location parameter (default=0)
+        Parameters
+        ----------
+        k : array-like
+            quantiles
+        arg1, arg2, arg3,... : array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+        loc : array-like, optional
+            location parameter (default=0)
+
+        Returns
+        -------
+        pmf : array-like
+            Probability mass function evaluated at k
+
         """
         loc = kwds.get('loc')
-        args, loc = self.fix_loc(args, loc)
+        args, loc = self._fix_loc(args, loc)
         k,loc = map(arr,(k,loc))
         args = tuple(map(arr,args))
         k = arr((k-loc))
@@ -5197,19 +3889,27 @@ class rv_discrete(rv_generic):
         return output
 
     def cdf(self, k, *args, **kwds):
-        """Cumulative distribution function at k of the given RV
+        """
+        Cumulative distribution function at k of the given RV
 
-        *args
-        =====
-        The shape parameter(s) for the distribution (see docstring of the
-           instance object for more information)
+        Parameters
+        ----------
+        k : array-like, int
+            quantiles
+        arg1, arg2, arg3,... : array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+        loc : array-like, optional
+            location parameter (default=0)
 
-        **kwds
-        ======
-        loc   - location parameter (default=0)
+        Returns
+        -------
+        cdf : array-like
+            Cumulative distribution function evaluated at k
+
         """
         loc = kwds.get('loc')
-        args, loc = self.fix_loc(args, loc)
+        args, loc = self._fix_loc(args, loc)
         k,loc = map(arr,(k,loc))
         args = tuple(map(arr,args))
         k = arr((k-loc))
@@ -5229,19 +3929,27 @@ class rv_discrete(rv_generic):
         return output
 
     def sf(self,k,*args,**kwds):
-        """Survival function (1-cdf) at k of the given RV
+        """
+        Survival function (1-cdf) at k of the given RV
 
-        *args
-        =====
-        The shape parameter(s) for the distribution (see docstring of the
-           instance object for more information)
+        Parameters
+        ----------
+        k : array-like
+            quantiles
+        arg1, arg2, arg3,... : array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+        loc : array-like, optional
+            location parameter (default=0)
 
-        **kwds
-        ======
-        loc   - location parameter (default=0)
+        Returns
+        -------
+        sf : array-like
+            Survival function evaluated at k
+
         """
         loc= kwds.get('loc')
-        args, loc = self.fix_loc(args, loc)
+        args, loc = self._fix_loc(args, loc)
         k,loc = map(arr,(k,loc))
         args = tuple(map(arr,args))
         k = arr(k-loc)
@@ -5259,19 +3967,27 @@ class rv_discrete(rv_generic):
         return output
 
     def ppf(self,q,*args,**kwds):
-        """Percent point function (inverse of cdf) at q of the given RV
+        """
+        Percent point function (inverse of cdf) at q of the given RV
 
-        *args
-        =====
-        The shape parameter(s) for the distribution (see docstring of the
-           instance object for more information)
+        Parameters
+        ----------
+        q : array-like
+            lower tail probability
+        arg1, arg2, arg3,... : array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+        loc : array-like, optional
+            location parameter (default=0)
 
-        **kwds
-        ======
-        loc   - location parameter (default=0)
+        Returns
+        -------
+        k : array-like
+            quantile corresponding to the lower tail probability, q.
+
         """
         loc = kwds.get('loc')
-        args, loc = self.fix_loc(args, loc)
+        args, loc = self._fix_loc(args, loc)
         q,loc  = map(arr,(q,loc))
         args = tuple(map(arr,args))
         cond0 = self._argcheck(*args) & (loc == loc)
@@ -5292,20 +4008,28 @@ class rv_discrete(rv_generic):
         return output
 
     def isf(self,q,*args,**kwds):
-        """Inverse survival function (1-sf) at q of the given RV
+        """
+        Inverse survival function (1-sf) at q of the given RV
 
-        *args
-        =====
-        The shape parameter(s) for the distribution (see docstring of the
-           instance object for more information)
+        Parameters
+        ----------
+        q : array-like
+            upper tail probability
+        arg1, arg2, arg3,... : array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+        loc : array-like, optional
+            location parameter (default=0)
 
-        **kwds
-        ======
-        loc   - location parameter (default=0)
+        Returns
+        -------
+        k : array-like
+            quantile corresponding to the upper tail probability, q.
+
         """
 
         loc = kwds.get('loc')
-        args, loc = self.fix_loc(args, loc)
+        args, loc = self._fix_loc(args, loc)
         q,loc  = map(arr,(q,loc))
         args = tuple(map(arr,args))
         cond0 = self._argcheck(*args) & (loc == loc)
@@ -5336,22 +4060,29 @@ class rv_discrete(rv_generic):
         return output
 
     def stats(self, *args, **kwds):
-        """Some statistics of the given discrete RV
+        """
+        Some statistics of the given discrete RV
 
-        *args
-        =====
-        The shape parameter(s) for the distribution (see docstring of the
-           instance object for more information)
+        Parameters
+        ----------
+        arg1, arg2, arg3,... : array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+        loc : array-like, optional
+            location parameter (default=0)
+        moments : string, optional
+            composed of letters ['mvsk'] defining which moments to compute:
+            'm' = mean,
+            'v' = variance,
+            's' = (Fisher's) skew,
+            'k' = (Fisher's) kurtosis.
+            (default='mv')
 
-        **kwds
-        ======
-        loc     - location parameter (default=0)
-        moments - a string composed of letters ['mvsk'] specifying
-                   which moments to compute (default='mv')
-                   'm' = mean,
-                   'v' = variance,
-                   's' = (Fisher's) skew,
-                   'k' = (Fisher's) kurtosis.
+        Returns
+        -------
+        stats : sequence
+            of requested moments.
+
         """
         loc,moments=map(kwds.get,['loc','moments'])
         N = len(args)
@@ -5438,6 +4169,18 @@ class rv_discrete(rv_generic):
             return tuple(output)
 
     def moment(self, n, *args, **kwds):   # Non-central moments in standard form.
+        """
+        n'th non-central moment of the distribution
+
+        Parameters
+        ----------
+        n: int, n>=1
+            order of moment
+        arg1, arg2, arg3,...: array-like
+            The shape parameter(s) for the distribution (see docstring of the
+            instance object for more information)
+
+        """
         if (floor(n) != n):
             raise ValueError, "Moment must be an integer."
         if (n < 0): raise ValueError, "Moment must be positive."
@@ -5456,11 +4199,18 @@ class rv_discrete(rv_generic):
                 if mu2 is None or mu is None: return self._munp(2,*args)
                 else: return mu2 + mu*mu
             elif (n==3):
-                if g1 is None or mu2 is None: return self._munp(3,*args)
-                else: return g1*(mu2**1.5)
+                if (g1 is None) or (mu2 is None) or (mu is None):
+                    return self._munp(3,*args)
+                else:
+                    mu3 = g1*(mu2**1.5) # 3rd central moment
+                    return mu3+3*mu*mu2+mu**3 # 3rd non-central moment
             else: # (n==4)
-                if g2 is None or mu2 is None: return self._munp(4,*args)
-                else: return (g2+3.0)*(mu2**2.0)
+                if (g2 is None) or (g1 is None) or (mu is None) or (mu2 is None):
+                    return self._munp(4,*args)
+                else:
+                    mu4 = (g2+3.0)*(mu2**2.0) # 4th central moment
+                    mu3 = g1*(mu2**1.5) # 3rd central moment
+                    return mu4+4*mu*mu3+6*mu*mu*mu2+mu**4
         else:
             return self._munp(n,*args)
 
@@ -5489,7 +4239,7 @@ class rv_discrete(rv_generic):
 
     def entropy(self, *args, **kwds):
         loc= kwds.get('loc')
-        args, loc = self.fix_loc(args, loc)
+        args, loc = self._fix_loc(args, loc)
         loc = arr(loc)
         args = map(arr,args)
         cond0 = self._argcheck(*args) & (loc==loc)
@@ -5510,27 +4260,6 @@ class binom_gen(rv_discrete):
     def _argcheck(self, n, pr):
         self.b = n
         return (n>=0) & (pr >= 0) & (pr <= 1)
-    def _pmf(self,x,n,pr):
-        """ Return PMF
-
-        Reference
-        --------------
-         Catherine Loader (2000).
-         "Fast and Accurate Computation of Binomial Probabilities";
-           url = "http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.35.2719" }
-        """
-        # if (p==0.0) return( (x==0) ? 1.0 : 0.0);
-        # if (p==1.0) return( (x==n) ? 1.0 : 0.0);
-        # if (x==0) return(exp(n.*log1p(-p)));
-        # if (x==n) return(exp(n.*log(p)));
-        PI2 = 2.*pi #6.283185307179586476925286;
-        yborder = (x==0.)*exp(n*log1p(-pr))+(x==n)*exp(n*log(pr))
-        nx = n-x
-        nq = n*(1.-pr)
-        lc = stirlerr(n) - stirlerr(x) - stirlerr(nx) - bd0(x,n*pr) - bd0(nx,nq)
-        inside = (0.<pr) & (pr<1.) & (0.<x) & (x < n)
-        return where(inside,exp(lc)*sqrt(n/(PI2*x*nx)),yborder)
-
     def _cdf(self, x, n, pr):
         k = floor(x)
         vals = special.bdtr(k,n,pr)
@@ -5575,8 +4304,6 @@ class bernoulli_gen(binom_gen):
         return (pr >=0 ) & (pr <= 1)
     def _cdf(self, x, pr):
         return binom_gen._cdf(self, x, 1, pr)
-    def _pmf(self,x,pr):
-        return binom_gen._pmf(self, x, 1, pr)
     def _sf(self, x, pr):
         return binom_gen._sf(self, x, 1, pr)
     def _ppf(self, q, pr):
@@ -5701,10 +4428,10 @@ class hypergeom_gen(rv_discrete):
         m2, m3, m4, m5 = m**2, m**3, m**4, m**5
         n2, n3, n4, n5 = n**2, n**2, n**4, n**5
         g2 = m3 - m5 + n*(3*m2-6*m3+m4) + 3*m*n2 - 12*m2*n2 + 8*m3*n2 + n3 \
-           - 6*m*n3 + 8*m2*n3 + m*n4 - n5 - 6*m3*N + 6*m4*N + 18*m2*n*N \
-           - 6*m3*n*N + 18*m*n2*N - 24*m2*n2*N - 6*n3*N - 6*m*n3*N \
-           + 6*n4*N + N*N*(6*m2 - 6*m3 - 24*m*n + 12*m2*n + 6*n2 + \
-                           12*m*n2 - 6*n3)
+             - 6*m*n3 + 8*m2*n3 + m*n4 - n5 - 6*m3*N + 6*m4*N + 18*m2*n*N \
+             - 6*m3*n*N + 18*m*n2*N - 24*m2*n2*N - 6*n3*N - 6*m*n3*N \
+             + 6*n4*N + N*N*(6*m2 - 6*m3 - 24*m*n + 12*m2*n + 6*n2 + \
+                             12*m*n2 - 6*n3)
         return mu, var, g1, g2
     def _entropy(self, M, n, N):
         k = r_[N-(M-n):min(n,N)+1]
@@ -5815,11 +4542,11 @@ class planck_gen(rv_discrete):
         k = floor(x)
         return 1-exp(-lambda_*(k+1))
     def _ppf(self, q, lambda_):
-        val = ceil(-1.0/lambda_ * log1p(-q)-1)
+        val = ceil(-1.0/lambda_ * log(1-q)-1)
         return val
     def _stats(self, lambda_):
         mu = 1/(exp(lambda_)-1)
-        var = exp(-lambda_)/(expm1(-lambda_))**2
+        var = exp(-lambda_)/(1-exp(-lambda_))**2
         g1 = 2*cosh(lambda_/2.0)
         g2 = 4+2*cosh(lambda_)
         return mu, var, g1, g2
@@ -6002,47 +4729,3 @@ dlapacle.pmf(k,a) = tanh(a/2) * exp(-a*abs(k))
 for a > 0.
 """
                         )
-
-if __name__=='__main__':
-    #nbinom(10, 0.75).rvs(3)
-    bernoulli(0.75).rvs(3)
-    x = np.r_[5,10]
-    npr = np.r_[9,9]
-    bd0(x,npr)
-    #Examples   MLE and better CI for phat.par[0]
-    R = weibull_min.rvs(1, size=100);
-    phat = weibull_min.fit(R,1,1,par_fix=[nan,0,nan])
-    Lp = phat.profile(i=0)
-    Lp.plot()
-    Lp.get_CI(alpha=0.1)
-    R = 1./990
-    x = phat.isf(R)
-
-    # CI for x
-    Lx = phat.profile(i=0,x=x)
-    Lx.plot()
-    Lx.get_CI(alpha=0.2)
-
-    # CI for logSF=log(SF)
-    Lpr = phat.profile(i=1,logSF=log(R),link = phat.dist.link)
-    Lpr.plot()
-    Lpr.get_CI(alpha=0.075)
-
-    dlaplace.stats(0.8,loc=0)
-#    pass
-    t = planck(0.51000000000000001)
-    t.ppf(0.5)
-    t = zipf(2)
-    t.ppf(0.5)
-    import pylab as plb
-    rice.rvs(1)
-    x = plb.linspace(-5,5)
-    y = genpareto.cdf(x,0)
-    #plb.plot(x,y)
-    #plb.show()
-
-
-    on = ones((2,3))
-    r = genpareto.rvs(0,size=100)
-    pht = genpareto.fit(r,1,par_fix=[0,0,nan])
-    lp = pht.profile()
