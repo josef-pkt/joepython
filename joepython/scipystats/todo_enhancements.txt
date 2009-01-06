@@ -1,0 +1,84 @@
+
+
+scipy.stats.stats
+=================
+
+* add sigmaclip: http://projects.scipy.org/scipy/scipy/attachment/ticket/368/stats.patch
+* add ols, nls, scipy version with leastsq - examples or/and part of stats.models
+* Anderson-Darling statistic as distance measure, KS mean difference (name?) ?what's this?
+* missing tests
+* docs and description of unclear functions (glm)
+  * grouped usage list for "unusual" functions, e.g. in morestats Box-Cox, Bayesian?
+* cleanup old functions in morestats
+  * DONE for plots
+* deprecate or clean duplicate functions, e.g. `sem`, `stderr`
+* array version of functions:
+  * percentileofscore
+  * correlation coefficients: pearson, spearman
+* consistency and comparison with masked array stats, `stats.mstats`
+
+maybe not:
+
+* weighted statistics, mean, var
+* residual statistics (analysis and tests of regression residuals, e.g. Durbin-Watson)
+
+
+
+scipy.stats.kde
+===============
+
+* add tests
+* add keyword paramater to __initialize__ to allow choice of smoothing parameter
+* why is smoothing parameter the same along all axis'?
+
+
+
+scipy.stats.distribution
+========================
+
+
+fixes
+-----
+
+* skew, kurtosis, 3rd, 4th moments: tests and corrections
+* starting values for fit
+* invalid domain of parameters of distributions, fuzz testing (from when I started)
+  - write problem list given my comments to parameter values
+  - try to get more realistic set of parameters from estimation (run fit on, e.g. normal, sample)
+* fix skipped methods (renamed methods because they didn't work)
+  - e.g. rdist: dispatch to explicit or generic methods depending on parameter
+
+
+
+improvements and enhancement
+----------------------------
+
+* log, exp for close to 0 or 1
+* Pers improvement of individual functions
+* recipes and convenience function for subclassing distributions
+
+
+
+big enhancement
+---------------
+
+* profile for fit (use keyword argument `fulloutput` ?)
+* other estimation methods (than ML)
+* semi-generic rejection method for rvs: just an idea, because some <distribution>.rvs are very slow
+
+
+
+Missing Things
+==============
+
+* a lot
+
+some ideas:
+
+* wrapper for scipy.signal to do linear time series analysis
+* usage of convolution and fft for statistics
+* more plot utility functions or example scripts (only matplotlib or more generic?)
+* which functions should return result class instances instead of just number, (use keyword fulloutput)
+
+
+
