@@ -7,7 +7,7 @@
 from __future__ import division
 
 import scipy
-from scipy.stats.plotbackend import plotbackend
+from plotbackend import plotbackend
 from scipy.integrate import quad
 from scipy.linalg import pinv2
 from scipy.misc import comb, derivative
@@ -64,7 +64,8 @@ arr = asarray
 gam = special.gamma
 
 import types
-import stats as st
+#import stats as st
+import scipy.stats as st
 
 
 all = alltrue
@@ -2166,7 +2167,7 @@ class rv_continuous(rv_generic):
             val = self._pdf(x, *args)
             return val*log(val)
         entr = -quad(integ,self.a,self.b)[0]
-	if np.isnan(entr):
+        if np.isnan(entr):
             # try with different limits if integration problems
             low,upp = self.ppf([0.001,0.999],*args)
             if np.isinf(self.b):
@@ -2178,7 +2179,7 @@ class rv_continuous(rv_generic):
             else:
                 lower = self.a
             entr = -quad(integ,lower,upper)[0]
-	return entr
+        return entr
 
 
     def entropy(self, *args, **kwds):
@@ -6004,45 +6005,92 @@ for a > 0.
                         )
 
 if __name__=='__main__':
+
+    #this is to check the changes to nbinom coefficient ???
     #nbinom(10, 0.75).rvs(3)
     bernoulli(0.75).rvs(3)
     x = np.r_[5,10]
     npr = np.r_[9,9]
     bd0(x,npr)
+
+    
     #Examples   MLE and better CI for phat.par[0]
     R = weibull_min.rvs(1, size=100);
     phat = weibull_min.fit(R,1,1,par_fix=[nan,0,nan])
     Lp = phat.profile(i=0)
     Lp.plot()
+    #plotbackend.show()
+    
     Lp.get_CI(alpha=0.1)
     R = 1./990
     x = phat.isf(R)
-
+    plotbackend.figure()
     # CI for x
-    Lx = phat.profile(i=0,x=x)
+    Lx = phat.profile(i=0,x=x) #keywords are not very informative
     Lx.plot()
+    #plotbackend.show()
     Lx.get_CI(alpha=0.2)
 
     # CI for logSF=log(SF)
-    Lpr = phat.profile(i=1,logSF=log(R),link = phat.dist.link)
-    Lpr.plot()
-    Lpr.get_CI(alpha=0.075)
+#the next line doesn't work
+##    Lpr = phat.profile(i=0,logSF=log(R),link = phat.dist.link)
+##    Lpr.plot()
+##    Lpr.get_CI(alpha=0.075)
 
+
+
+    ###### example
     dlaplace.stats(0.8,loc=0)
-#    pass
-    t = planck(0.51000000000000001)
-    t.ppf(0.5)
-    t = zipf(2)
-    t.ppf(0.5)
-    import pylab as plb
+    pt = planck(0.51000000000000001)  #t shadowed the t distribution
+    pt.ppf(0.5)
+    pt = zipf(2)
+    pt.ppf(0.5)
     rice.rvs(1)
-    x = plb.linspace(-5,5)
-    y = genpareto.cdf(x,0)
-    #plb.plot(x,y)
-    #plb.show()
+    
+    x = np.linspace(-5,5)
+    y = genpareto.cdf(x,0.001)
+    plotbackend.figure()
+    plotbackend.plot(x,y)
+    #plotbackend.show()
 
-
+    ###### example
     on = ones((2,3))
-    r = genpareto.rvs(0,size=100)
+    r = genpareto.rvs(0.00001,size=100)
     pht = genpareto.fit(r,1,par_fix=[0,0,nan])
     lp = pht.profile()
+    print pht.stats()
+    print pht.pvalue
+    plotbackend.figure()
+    pht.plotecdf()
+    pht.plotecdf()
+    plotbackend.figure()
+    pht.plotepdf()
+    plotbackend.figure()
+    pht.plotresq()
+    plotbackend.figure()
+    pht.plotresprb()
+    plotbackend.figure()
+    pht.plotfitsumry()
+    plotbackend.figure()
+    lp.plot()
+
+    def t_example():
+        #JP: add a t example
+        #doesn't work t is frozen, cleaned up
+        R = t.rvs(20,size=(100,1));
+        phat = t.fit(R)
+        #causes
+    ##File "C:\Josef\_progs\projectsvn\joepython_googlecode\joepython\branches\distper2\per\distributions.py", line 4179, in _pdf
+    ##    Px /= sqrt(r*pi)*(1+(x**2)/r)**((r+1)/2)
+    ##ValueError: invalid return array shape    
+        #FitDistribution(self, data, *args, **kwds)
+        #phat_d = FitDistribution(distributions.t,R, method='ml')
+        Lp = phat.profile(i=0)
+        Lp.plot()
+        Lp.get_CI(alpha=0.1)
+        R = 1./990
+        x = phat.isf(R)
+
+
+    try: t_example()
+    except ValueError: print 't_example raises ValueError'
