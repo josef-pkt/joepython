@@ -1,3 +1,8 @@
+'''Example for non-linear least-squares estimation
+
+and comparison with quadratic function linear-in parameter ols
+'''
+#import matplotlib.pylab as plt
 from scipy import optimize, linalg
 #from scipy.optimize import leastsq
 from numpy import array, zeros, float64, dot, log, exp, inf, sin, cos
@@ -49,7 +54,8 @@ class TestLeastSq(object):
     def test_full_output(self):
         p0 = np.zeros(self.ncoef)
         #p0 = np.array([-0.5, 42, -304.2, 15])
-        p0 = np.array([-1, 15, -300, 20]) # requirements for convergence p1<0.5, p4>15
+        p0 = np.array([-1, 15, -300, 20])
+        # requirements for convergence p0[0]<0.5, p0[3]>15
         full_output = optimize.leastsq(self.residuals, p0,
                               args=(self.y_meas, self.x),
                               full_output=True)
@@ -76,11 +82,14 @@ class TestLeastSq(object):
 
     def ols(self):
         p_ls,resid,rank,sigma = linalg.lstsq(self.xx, self.y_meas[:,np.newaxis])
-        self.p_ols = p_ols.T
+        self.p_ols = p_ls.T
 
         #self.e = self.residuals(tuple(self.p_ols.flat), self.y_meas, self.x)
-        self.e = self.residuals(self.p_ols.ravel(), self.y_meas, self.x)
-        self.sse = np.dot(self.e,self.e)/self.df_e         # SSE
+        #self.e = self.residuals(self.p_ols.ravel(), self.y_meas, self.x)
+        self.yhat = np.dot(self.xx,self.p_ols.T)
+        self.e = self.y_meas - self.yhat[:,0]   # yhat is 2D
+        self.sse = np.dot(self.e.T,self.e)/self.df_e         # SSE
+        #self.sse = np.sum(self.e*self.e,0)/self.df_e   
         self.inv_xx = linalg.pinv(dot(self.xx.T,self.xx))
         self.cov_ols = self.sse*self.inv_xx
         self.se = np.sqrt(np.diagonal(self.cov_ols))
@@ -89,6 +98,22 @@ class TestLeastSq(object):
         self.b_ols = dot(self.inv_xx,xy)
         return sigma
 
+    def plot_results(self,plot=None):
+        if plot is None:
+            import matplotlib.pylab as plot
+        plot.figure()
+        plot.title('Non-Linear Regression Example')
+        plot.plot(nls_res.x,nls_res.y_true,'g.--')
+        plot.plot(nls_res.x,nls_res.y_meas,'k.')
+        plot.plot(nls_res.x,nls_res.y_meas-nls_res.e,'r.-')
+        plot.legend(['original','plus noise', 'regression'], loc='lower right')
+        #add quadratic ols
+        self.ols()   # overwrites results
+        plot.plot(nls_res.x,nls_res.yhat,'b.-')
+        plot.figure()
+        plot.title('Non-Linear Regression Residuals - quadratic approximation')
+        plot.plot(nls_res.x,nls_res.e,'bo')
+
 if __name__ == '__main__':
     nls_res = TestLeastSq(yfun)
     nls_res.test_full_output()
@@ -96,11 +121,8 @@ if __name__ == '__main__':
     print nls_res.se
     print nls_res.t
 
-        #matplotlib ploting
+    #matplotlib ploting
     import matplotlib.pylab as plt
-    plt.title('Linear Regression Example')
-    plt.plot(nls_res.x,nls_res.y_true,'g.--')
-    plt.plot(nls_res.x,nls_res.y_meas,'k.')
-    plt.plot(nls_res.x,nls_res.y_meas-nls_res.e,'r.-')
-    plt.legend(['original','plus noise', 'regression'], loc='lower right')
-    plt.show()
+    #nls_res.plot_results()#plt=plt)
+    
+    #plt.show()

@@ -56,14 +56,15 @@ class ols:
         Initializing the ols class.
         """
         self.y = y
+        self.addconst = addconst
         if addconst:
             self.x = np.c_[np.ones(x.shape[0]),x]
         else:
             self.x = x
         self.y_varnm = y_varnm
-        if not isinstance(x_varnm,list):
-            self.x_varnm = ['const'] + list(x_varnm)
-        else:
+        if isinstance(x_varnm,basestring):
+            self.x_varnm = ['const'] + [x_varnm]
+        elif isinstance(x_varnm,list):   # not very flexible
             self.x_varnm = ['const'] + x_varnm
 
         # Estimate model using OLS
@@ -72,20 +73,20 @@ class ols:
     def estimate(self):
 
         # estimating coefficients, and basic stats
-        self.inv_xx = linalg.pinv(dot(self.x.T,self.x)) # use Moore-Penrose pseudoinverse
+        self.inv_xx = linalg.pinv(np.dot(self.x.T,self.x)) # use Moore-Penrose pseudoinverse
         xy = dot(self.x.T,self.y)
         self.b = dot(self.inv_xx,xy)                    # estimate coefficients
-
+        #print self.b.shape   # column vector
         self.nobs = self.y.shape[0]                     # number of observations
         self.ncoef = self.x.shape[1]                    # number of coef.
         self.df_e = self.nobs - self.ncoef              # degrees of freedom, error
         self.df_r = self.ncoef - 1                      # degrees of freedom, regression
-
-        self.e = self.y - dot(self.x,self.b)            # residuals
-        self.sse = dot(self.e,self.e)/self.df_e         # SSE
+        self.yest = np.dot(self.x,self.b)
+        self.e = self.y - self.yest #np.dot(self.x,self.b)            # residuals
+        self.sse = dot(self.e.T,self.e)/self.df_e         # SSE
         self.se = np.sqrt(np.diagonal(self.sse*self.inv_xx))  # coef. standard errors
         self.t = self.b / self.se                       # coef. t-statistics
-        self.p = (1-stats.t.cdf(np.abs(self.t), self.df_e)) * 2    # coef. p-values
+        self.p = stats.t.sf(np.abs(self.t), self.df_e) * 2    # coef. p-values
 
         self.R2 = 1 - self.e.var()/self.y.var()         # model R-squared
         self.R2adj = 1-(1-self.R2)*((self.nobs-1)/(self.nobs-self.ncoef))   # adjusted R-square
@@ -129,7 +130,7 @@ class ols:
         """
 
         # Model log-likelihood, AIC, and BIC criterion values
-        ll = -(self.nobs*1/2)*(1+np.log(2*np.pi)) - (self.nobs/2)*np.log(dot(self.e,self.e)/self.nobs)
+        ll = -(self.nobs*1/2)*(1+np.log(2*np.pi)) - (self.nobs/2)*np.log(dot(self.e.T,self.e)/self.nobs)
         aic = -2*ll/self.nobs + (2*self.ncoef/self.nobs)
         bic = -2*ll/self.nobs + (self.ncoef*np.log(self.nobs))/self.nobs
 
@@ -173,6 +174,14 @@ class ols:
         print 'BIC criterion        % -5.6f         Kurtosis            % -5.6f' % tuple([bic, kurtosis])
         print '=============================================================================='
 
+    def predict(self, x):
+        '''redurn prediction
+        todo: add prediction error, confidence intervall'''
+        if self.addconst:
+            x  = np.c_[np.ones(x.shape[0]),x]
+        return dot(x,self.b)
+        
+
 if __name__ == '__main__':
     xxsingular = False#True
     x = np.linspace(0, 15, 40)
@@ -197,4 +206,21 @@ if __name__ == '__main__':
     plt.plot(x,y_meas,'k.')
     plt.plot(x,y_meas-m.e,'r.-')
     plt.legend(['original','plus noise', 'regression'], loc='lower right')
-    plt.show()
+    #plt.show()
+
+    xnew = np.linspace(16, 20, 4)
+    xxnew = np.c_[xnew**2,xnew,np.ones(xnew.shape[0])]
+    print 'predictions'
+    print np.c_[xnew,m.predict(xxnew)]
+
+    x = np.random.randn(15,2)
+    btrue = np.array([[1,2,5]]).T
+    y = np.dot(x,btrue[:-1,:]) + btrue[-1,:] + 0.5 * np.random.randn(15,1)
+    est = ols(y,x)
+    print
+
+    x = np.random.randn(50,2)
+    y = (x*[1,0.5]).sum(axis=1)
+    res = ols(y,x[:,0],addconst=True,x_varnm = 'slope')
+    
+    
