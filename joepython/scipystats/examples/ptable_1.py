@@ -57,9 +57,12 @@ def ptable(data, dv, keep, outformat='flat'):
     elif outformat == 'table':
         # convert flat table to multidimensional
         K = len(keep)
-        mmean, uns = flat2multi(statarr[:,range(K)+[K]])
-        mstd, uns = flat2multi(statarr[:,range(K)+[K+1]])
-        mcount, uns = flat2multi(statarr[:,range(K)+[K+2]])
+#        mmean, uns = flat2multi(statarr[:,range(K)+[K]])
+#        mstd, uns = flat2multi(statarr[:,range(K)+[K+1]])
+#        mcount, uns = flat2multi(statarr[:,range(K)+[K+2]])
+        mmean, uns = flat2nd(statarr[:,range(K)+[K]])
+        mstd, uns = flat2nd(statarr[:,range(K)+[K+1]])
+        mcount, uns = flat2nd(statarr[:,range(K)+[K+2]])
         return uns, mmean, mstd, mcount
     else:
         raise ValueError, "outformat can only be 'flat' or 'table'"

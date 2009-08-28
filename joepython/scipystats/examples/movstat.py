@@ -3,6 +3,9 @@
 statistics
 
 see also timeseries scikits (movstat is partially inspired by it)
+(added 2009-08-29:
+timeseries moving stats are in c, autocorrelation similar to here
+I thought I saw moving stats somewhere in python, maybe not)
 
 
 TODO:
@@ -63,7 +66,7 @@ def mov_order(x, order = 'med', windsize=3, lag='lagged'):
     else:
         raise ValueError
     if np.isfinite(order) == True: #if np.isnumber(order):
-        ord = order
+        ord = order   # note: ord is a builtin function
     elif order == 'med':
         ord = (windsize - 1)/2
     elif order == 'min':

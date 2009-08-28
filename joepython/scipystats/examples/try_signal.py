@@ -1,6 +1,8 @@
 '''ARMA estimation: using signal.lfilter and optimize.leastsquares
 
 seems to work
+TODO: get full ML estimate, what's the likelihood function for initial observation, need
+      stationary distribution
 '''
 
 import numpy as np
@@ -163,6 +165,7 @@ print 'fminLS ARMA(1,1)', resultfmin
 
 
 class ARIMA(object):
+    '''currently ARMA only, no differencing used - no I'''
     def __init__(self):
         pass
     def estimate(self,x,p,q, rhoy0=None, rhoe0=None):
